@@ -80,9 +80,11 @@ void WoodLibrary::startRun(materials::WoodSpecies species) {
 }
 
 WoodCut WoodLibrary::cut(blocks::BlockType type, materials::WoodSpecies species, FiberAxis axis) {
-    const auto& def = blocks::definition(type);
-    const int f = fiberAxisIndex(type, axis);
-    const float length = 2.0f * def.halfExtents[f];
+    return cutBox(blocks::definition(type).halfExtents, species, fiberAxisIndex(type, axis));
+}
+
+WoodCut WoodLibrary::cutBox(const glm::vec3& halfExtents, materials::WoodSpecies species, int f) {
+    const float length = 2.0f * halfExtents[f];
 
     Cursor& c = cursorFor(species);
     if (c.z + length > m_sources[c.source].params().length) advanceCell(c, species);

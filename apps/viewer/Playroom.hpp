@@ -1,6 +1,7 @@
 #pragma once
 
 #include "woodyn/geometry/RoundedMesh.hpp"
+#include "woodyn/render/GpuRenderer.hpp"
 #include "woodyn/simulation/Simulation.hpp"
 
 #include <glm/vec3.hpp>
@@ -41,5 +42,12 @@ struct Room {
 
 /// Builds the playroom around `area` (or a default-size room without fence).
 Room buildPlayroom(const Skin& skin, const simulation::PlayArea* area);
+
+/// PBR room surfaces for the GPU renderer: painted walls with polka dots and
+/// the 1 cm thick EVA play mat (floorboards and fence are wood instances).
+std::vector<render::RoomVertex> buildGpuRoom(const Skin& skin, const simulation::PlayArea& area);
+
+/// Mat thickness [m]: the mat top is y = 0 (the physics floor), floorboards lie below.
+inline constexpr float kMatThickness = 0.01f;
 
 } // namespace woodyn::viewer

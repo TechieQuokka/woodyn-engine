@@ -1,0 +1,25 @@
+#version 460
+// Evaluates the GPU grain at given points so tests can compare it with the
+// CPU reference (wood::surfaceAlbedo).
+#include "wood.glsl"
+layout(local_size_x = 64) in;
+struct Probe {
+    vec4 localPos;
+    vec4 localNormal;
+    vec4 cutRot;
+    vec4 cutCenter; // w: source index
+    vec4 stain;     // rgb dye, w stained
+};
+layout(std430, set = 0, binding = 0) readonly buffer Probes { Probe probes[]; };
+layout(std430, set = 0, binding = 1) readonly buffer Woods { WoodParams woods[]; };
+layout(std430, set = 1, binding = 0) writeonly buffer Out { vec4 colors[]; };
+layout(std140, set = 2, binding = 0) uniform Count { uvec4 count; } u;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= u.count.x) return;
+    Probe p = probes[i];
+    vec3 logPos = p.cutCenter.xyz + wd_rotate(p.cutRot, p.localPos.xyz);
+    Grain g = wd_sampleGrain(logPos, woods[int(p.cutCenter.w)]);
+    float endGrain = wd_endGrainFactor(p.cutRot, p.localNormal.xyz);
+    colors[i] = vec4(wd_surfaceAlbedo(g, endGrain, p.stain.rgb, p.stain.w > 0.5), 1.0);
+}

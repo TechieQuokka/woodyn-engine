@@ -11,8 +11,9 @@
 namespace woodyn::simulation {
 namespace {
 
-// EVA foam play mat: grippy and soft (PROVISIONAL).
-constexpr physics::SurfaceProperties kPlayMat{0.70f, 0.15f};
+// EVA foam play mat: grippy and soft. The foam deforms under a block, so it
+// strongly resists rolling and rocking (PROVISIONAL, D-46).
+constexpr physics::SurfaceProperties kPlayMat{0.70f, 0.15f, 0.08f, true};
 
 std::uint64_t pairKey(physics::BodyId a, physics::BodyId b) {
     const auto lo = std::min(a.value, b.value);
@@ -42,7 +43,7 @@ void Simulation::addFloor(float halfSize, materials::WoodSpecies surface) {
     const auto& props = materials::physicalProperties(surface);
     constexpr float kHalfThickness = 0.05f;
     addSurfaceBox({halfSize, kHalfThickness, halfSize}, {0.0f, -kHalfThickness, 0.0f},
-                  {props.friction, props.restitution}, audio::SurfaceKind::Wood);
+                  {props.friction, props.restitution, props.rollingResistance}, audio::SurfaceKind::Wood);
 }
 
 void Simulation::addPlayArea(const PlayArea& area) {
@@ -50,7 +51,7 @@ void Simulation::addPlayArea(const PlayArea& area) {
     const float t = area.wallThickness;
     const float outer = h + t;
     const auto& wood = materials::physicalProperties(materials::WoodSpecies::Beech);
-    const physics::SurfaceProperties woodSurface{wood.friction, wood.restitution};
+    const physics::SurfaceProperties woodSurface{wood.friction, wood.restitution, wood.rollingResistance};
 
     // Mat (thick slab, top at y = 0).
     addSurfaceBox({outer, t * 0.5f, outer}, {0.0f, -t * 0.5f, 0.0f}, kPlayMat,

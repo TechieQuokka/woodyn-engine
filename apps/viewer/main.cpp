@@ -6,19 +6,25 @@
 //              + Shift + mouse up/down: raise/lower    + wheel: raise/lower
 //              + Ctrl + mouse drag: turn it in the hand
 //              + hold Space: gently align to the nearest square orientation
-//              + Q / E: turn 90 deg   R: tip 90 deg     release: drop or throw
+//              + Q / E: turn, R / F: tip (tap 1 deg, hold = continuous, Shift = 90 deg)
+//              + Ctrl+wheel: 1 deg   Ctrl+Shift+mouse: fine turning   release: drop or throw
+//   Shelf      press a block on the bottom shelf to take a new one; color swatches; Tab hides it
+//   Window     F11 fullscreen
 //   Create     1-9 drop a block at the cursor (Cube, Brick, Beam, Roof, Cylinder, HalfCyl,
 //              Arch, Cone, Pyramid) · C recolor held/hovered block · O beech/oak
 //   Scene      F2 tower  F3 house  F4 showcase  F5 pile  F6 grain demo  Delete clear
 //   Edit       Ctrl+Z undo · Ctrl+Y / Ctrl+Shift+Z redo
+//   Rendering  F7 depth of field · F8 ambient occlusion + contact shadows · F9 bloom
 //   Other      P pause · M mute · F1 help · Esc quit
 //
 // Headless verification:
 //   woodyn_viewer --scene house --frames 300 --screenshot out.bmp [--hidden] [--demo-grab]
 
 #include "DebugRenderer.hpp"
+#include "GpuView.hpp"
 #include "OrbitCamera.hpp"
 #include "Playroom.hpp"
+#include "Shelf.hpp"
 
 #include "woodyn/core/Log.hpp"
 #include "woodyn/simulation/ImpactSound.hpp"
@@ -31,6 +37,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <variant>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -52,6 +59,7 @@ struct Options {
     bool hidden = false;
     bool demoGrab = false;    // scripted pick-and-carry for headless checks
     bool mute = false;
+    std::string renderer = "gpu"; // gpu (Vulkan PBR) or soft (debug software renderer)
     float zoom = 0.0f;        // camera distance override (screenshots)
     float yaw = -100.0f;      // camera yaw override [rad], -100 = keep default
 };
@@ -67,6 +75,7 @@ Options parse(int argc, char** argv) {
         else if (a == "--hidden") o.hidden = true;
         else if (a == "--demo-grab") o.demoGrab = true;
         else if (a == "--mute") o.mute = true;
+        else if (a == "--renderer") o.renderer = next();
         else if (a == "--zoom") o.zoom = std::stof(next());
         else if (a == "--yaw") o.yaw = std::stof(next());
         else std::fprintf(stderr, "ignoring unknown argument: %s\n", a.c_str());
@@ -141,9 +150,21 @@ private:
 
 class App {
 public:
-    App(SDL_Renderer* renderer, bool mute) : m_draw(renderer), m_renderer(renderer), m_muted(mute) {
+    App(SDL_Renderer* renderer, SDL_Window* window, SDL_GPUDevice* device, bool mute)
+        : m_renderer(renderer), m_muted(mute) {
+        m_window = window;
         m_sim.addPlayArea();
-        m_draw.setRoom(viewer::buildPlayroom(viewer::Skin{}, &*m_sim.playArea()));
+        if (device) {
+            m_gpuView = std::make_unique<viewer::GpuView>(device, renderer, *m_sim.playArea());
+            if (!m_gpuView->ok()) {
+                log::warn("GPU renderer unavailable, using the software renderer");
+                m_gpuView.reset();
+            }
+        }
+        if (!m_gpuView) {
+            m_draw = std::make_unique<viewer::DebugRenderer>(renderer);
+            m_draw->setRoom(viewer::buildPlayroom(viewer::Skin{}, &*m_sim.playArea()));
+        }
         m_audio = std::make_unique<AudioOutput>(m_synth);
     }
 
@@ -171,7 +192,17 @@ public:
         case SDL_EVENT_QUIT: return false;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             m_mouse = {e.button.x, e.button.y};
-            if (e.button.button == SDL_BUTTON_LEFT) tryGrab(e.button.x, e.button.y);
+            if (e.button.button == SDL_BUTTON_LEFT) {
+                if (const auto hit = m_shelf.hitTest(e.button.x, e.button.y)) {
+                    if (const auto* slot = std::get_if<viewer::Shelf::BlockSlot>(&*hit)) {
+                        spawnIntoHand(slot->type, e.button.x, e.button.y);
+                    } else if (const auto* sw = std::get_if<viewer::Shelf::StainSwatch>(&*hit)) {
+                        m_nextStain = sw->stain;
+                    }
+                } else if (!m_shelf.contains(e.button.x, e.button.y)) {
+                    tryGrab(e.button.x, e.button.y);
+                }
+            }
             break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
             if (e.button.button == SDL_BUTTON_LEFT) release();
@@ -180,7 +211,8 @@ public:
             m_mouse = {e.motion.x, e.motion.y};
             if (world.grabbedBody()) {
                 if (ctrl) {
-                    turnInHand(e.motion.xrel, e.motion.yrel);
+                    // Ctrl: turn in the hand; Ctrl+Shift: precision (4x slower).
+                    turnInHand(e.motion.xrel, e.motion.yrel, shift ? 0.001f : 0.004f);
                 } else if (shift) {
                     m_handHeight = std::clamp(m_handHeight - e.motion.yrel * 0.0012f * m_camera.distance, 0.005f, 0.9f);
                     m_handTarget.y = m_handHeight;
@@ -196,7 +228,9 @@ public:
             }
             break;
         case SDL_EVENT_MOUSE_WHEEL:
-            if (world.grabbedBody()) {
+            if (world.grabbedBody() && ctrl) {
+                turnDegrees(e.wheel.y, glm::vec3(0, 1, 0)); // 1 deg per notch
+            } else if (world.grabbedBody()) {
                 m_handHeight = std::clamp(m_handHeight + 0.006f * e.wheel.y, 0.005f, 0.9f);
                 m_handTarget.y = m_handHeight;
                 world.moveGrab(m_handTarget);
@@ -217,13 +251,25 @@ public:
             else if (k == SDLK_F4) loadScene("showcase");
             else if (k == SDLK_F5) loadScene("pile");
             else if (k == SDLK_F6) loadScene("grain");
+            else if (k == SDLK_F7 && m_gpuView) m_gpuView->settings.dof = !m_gpuView->settings.dof;
+            else if (k == SDLK_F8 && m_gpuView) {
+                m_gpuView->settings.ssao = !m_gpuView->settings.ssao;
+                m_gpuView->settings.contactShadows = m_gpuView->settings.ssao;
+            }
+            else if (k == SDLK_F9 && m_gpuView) m_gpuView->settings.bloom = !m_gpuView->settings.bloom;
             else if (k == SDLK_DELETE) { pushUndo(); release(); m_sim.clearBlocks(); }
             else if (k == SDLK_P) m_sim.paused = !m_sim.paused;
             else if (k == SDLK_M) m_muted = !m_muted;
             else if (k == SDLK_F1) m_showHelp = !m_showHelp;
-            else if (k == SDLK_Q) turnStep(glm::angleAxis(glm::half_pi<float>(), glm::vec3(0, 1, 0)));
-            else if (k == SDLK_E) turnStep(glm::angleAxis(-glm::half_pi<float>(), glm::vec3(0, 1, 0)));
-            else if (k == SDLK_R) tip();
+            else if (k == SDLK_Q || k == SDLK_E || k == SDLK_R || k == SDLK_F) {
+                // Tap: 1 deg. Hold: continuous turning (see turnWhileKeysHeld). Shift: 90 deg.
+                const float sign = (k == SDLK_Q || k == SDLK_R) ? 1.0f : -1.0f;
+                const glm::vec3 axis = (k == SDLK_Q || k == SDLK_E) ? glm::vec3(0, 1, 0) : tipAxis();
+                turnDegrees(sign * (shift ? 90.0f : 1.0f), axis);
+                m_keyPressTime[rotationKeyIndex(k)] = m_clock;
+            }
+            else if (k == SDLK_F11) toggleFullscreen();
+            else if (k == SDLK_TAB) m_shelf.visible = !m_shelf.visible;
             else if (k == SDLK_C) recolor();
             else if (k == SDLK_O) {
                 m_species = m_species == materials::WoodSpecies::Beech ? materials::WoodSpecies::Oak
@@ -237,15 +283,22 @@ public:
     }
 
     void frame(float dt) {
+        m_clock += static_cast<double>(dt);
         moveCameraWithKeys(dt);
         alignWhileSpaceHeld(dt);
+        turnWhileKeysHeld(dt);
 
         const auto stats = m_sim.advance(dt);
         m_physicsMs = 0.9 * m_physicsMs + 0.1 * stats.physicsMilliseconds;
         m_fps = 0.95 * m_fps + 0.05 * (dt > 0.0f ? 1.0 / static_cast<double>(dt) : 0.0);
         playSounds();
 
-        m_draw.draw(m_sim, m_camera, buildOverlay());
+        if (m_gpuView) m_gpuView->draw(m_sim, m_camera, buildOverlay());
+        else m_draw->draw(m_sim, m_camera, buildOverlay());
+        int w = 0, h = 0;
+        SDL_GetCurrentRenderOutputSize(m_renderer, &w, &h);
+        m_shelf.layout(w, h);
+        m_shelf.draw(m_renderer, m_nextStain, m_species, m_mouse.x, m_mouse.y);
         drawHud();
     }
 
@@ -361,25 +414,81 @@ private:
 
     void release() { m_sim.world().endGrab(); }
 
-    void turnInHand(float dx, float dy) {
+    void turnInHand(float dx, float dy, float radiansPerPixel) {
         const glm::vec3 fwd = glm::normalize(m_camera.target - m_camera.eye());
         const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3(0, 1, 0)));
-        m_targetRotation = glm::normalize(glm::angleAxis(dx * 0.012f, glm::vec3(0, 1, 0)) *
-                                          glm::angleAxis(dy * 0.012f, right) * m_targetRotation);
+        m_targetRotation = glm::normalize(glm::angleAxis(dx * radiansPerPixel, glm::vec3(0, 1, 0)) *
+                                          glm::angleAxis(dy * radiansPerPixel, right) * m_targetRotation);
         m_sim.world().setGrabOrientation(m_targetRotation);
     }
 
-    void turnStep(const glm::quat& r) {
+    /// Rotates the held block's target orientation about a world axis.
+    void turnDegrees(float degrees, const glm::vec3& axis) {
         if (!m_sim.world().grabbedBody()) return;
-        m_targetRotation = glm::normalize(r * m_targetRotation);
+        m_targetRotation = glm::normalize(glm::angleAxis(glm::radians(degrees), axis) * m_targetRotation);
         m_sim.world().setGrabOrientation(m_targetRotation);
     }
 
-    void tip() {
+    /// World axis used for tipping: the horizontal axis closest to the camera's right.
+    glm::vec3 tipAxis() const {
         const glm::vec3 fwd = m_camera.target - m_camera.eye();
-        const glm::vec3 axis = std::abs(fwd.x) > std::abs(fwd.z) ? glm::vec3(0, 0, fwd.x > 0 ? 1.0f : -1.0f)
-                                                               : glm::vec3(fwd.z > 0 ? -1.0f : 1.0f, 0, 0);
-        turnStep(glm::angleAxis(glm::half_pi<float>(), axis));
+        return std::abs(fwd.x) > std::abs(fwd.z) ? glm::vec3(0, 0, fwd.x > 0 ? 1.0f : -1.0f)
+                                                 : glm::vec3(fwd.z > 0 ? -1.0f : 1.0f, 0, 0);
+    }
+
+    static std::size_t rotationKeyIndex(SDL_Keycode k) {
+        return k == SDLK_Q ? 0 : k == SDLK_E ? 1 : k == SDLK_R ? 2 : 3;
+    }
+
+    /// Holding Q/E/R/F keeps turning: after 0.3 s, 20 deg/s ramping to 90 deg/s.
+    void turnWhileKeysHeld(float dt) {
+        if (!m_sim.world().grabbedBody()) return;
+        if ((SDL_GetModState() & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0) return;
+        const bool* keys = SDL_GetKeyboardState(nullptr);
+        const std::array<std::pair<SDL_Scancode, SDL_Keycode>, 4> map{{{SDL_SCANCODE_Q, SDLK_Q}, {SDL_SCANCODE_E, SDLK_E},
+                                                                       {SDL_SCANCODE_R, SDLK_R}, {SDL_SCANCODE_F, SDLK_F}}};
+        for (const auto& [scan, key] : map) {
+            if (!keys[scan]) continue;
+            const double held = m_clock - m_keyPressTime[rotationKeyIndex(key)];
+            if (held < 0.3) continue;
+            const float rate = std::min(90.0f, 20.0f + 50.0f * static_cast<float>(held - 0.3));
+            const float sign = (key == SDLK_Q || key == SDLK_R) ? 1.0f : -1.0f;
+            const glm::vec3 axis = (key == SDLK_Q || key == SDLK_E) ? glm::vec3(0, 1, 0) : tipAxis();
+            turnDegrees(sign * rate * dt, axis);
+        }
+    }
+
+    void toggleFullscreen() {
+        if (!m_window) return;
+        const bool full = (SDL_GetWindowFlags(m_window) & SDL_WINDOW_FULLSCREEN) != 0;
+        SDL_SetWindowFullscreen(m_window, !full);
+    }
+
+    /// Takes a new block from the shelf straight into the hand.
+    void spawnIntoHand(blocks::BlockType type, float x, float y) {
+        pushUndo();
+        int w = 0, h = 0;
+        SDL_GetRenderOutputSize(m_renderer, &w, &h);
+        const auto [origin, dir] = viewer::DebugRenderer::pickRay(m_camera, x, y, w, h);
+        glm::vec3 at = m_camera.target;
+        if (dir.y < -1e-4f) at = origin + dir * (-origin.y / dir.y);
+        const float limit = (m_sim.playArea() ? m_sim.playArea()->halfSize : 0.6f) - 0.07f;
+        at.x = std::clamp(at.x, -limit, limit);
+        at.z = std::clamp(at.z, -limit, limit);
+        const auto& def = blocks::definition(type);
+        physics::Transform t;
+        t.position = {at.x, def.halfExtents.y + 0.06f, at.z};
+        const auto index = m_sim.addBlock(type, m_species, t, m_nextStain);
+        m_nextStain = materials::nextStain(m_nextStain);
+        auto& world = m_sim.world();
+        const glm::vec3 handle = t.position + glm::vec3(0.0f, def.halfExtents.y * 0.8f, 0.0f);
+        world.beginGrab(m_sim.blocks()[index].body, handle);
+        m_grabStart = handle;
+        m_handHeight = handle.y;
+        m_handTarget = handle;
+        world.moveGrab(m_handTarget);
+        m_targetRotation = t.rotation;
+        world.setGrabOrientation(m_targetRotation);
     }
 
     void alignWhileSpaceHeld(float dt) {
@@ -449,6 +558,8 @@ private:
                 }
             }
             if (const auto p = world.grabPoint()) o.rubberBand = std::make_pair(*p, m_handTarget);
+        } else if (m_shelf.contains(m_mouse.x, m_mouse.y)) {
+            // Pointer is on the shelf: nothing in the scene is hovered.
         } else if (const auto hit = pick(m_mouse.x, m_mouse.y)) {
             o.hovered = m_sim.blockIndex(hit->body);
         }
@@ -456,7 +567,11 @@ private:
     }
 
     void text(float x, float y, const std::string& s) {
-        SDL_SetRenderDrawColorFloat(m_renderer, 0.25f, 0.20f, 0.18f, 1.0f);
+        // Light text with a soft shadow: readable on both the walls and the mat.
+        SDL_SetRenderDrawColorFloat(m_renderer, 0.0f, 0.0f, 0.0f, 0.55f);
+        SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
+        SDL_RenderDebugText(m_renderer, x + 1.0f, y + 1.0f, s.c_str());
+        SDL_SetRenderDrawColorFloat(m_renderer, 1.0f, 0.98f, 0.94f, 1.0f);
         SDL_RenderDebugText(m_renderer, x, y, s.c_str());
     }
 
@@ -472,17 +587,41 @@ private:
                       m_muted ? "muted" : (m_audio && m_audio->ok() ? "on" : "unavailable"),
                       m_sim.world().grabbedBody() ? " | HOLDING" : "");
         text(10.0f, 24.0f, line);
+        if (m_sim.world().grabbedBody()) {
+            // Orientation readout for 1-degree adjustments: heading and tilt.
+            const glm::vec3 x = m_targetRotation * glm::vec3(1, 0, 0);
+            const glm::vec3 up = m_targetRotation * glm::vec3(0, 1, 0);
+            float heading = std::round(glm::degrees(std::atan2(-x.z, x.x)));
+            if (heading == 0.0f) heading = 0.0f; // avoid printing "-0"
+            const float tilt = glm::degrees(std::acos(std::clamp(up.y, -1.0f, 1.0f)));
+            std::snprintf(line, sizeof(line), "holding: heading %+.0f deg | tilt %.0f deg", static_cast<double>(heading),
+                          static_cast<double>(tilt));
+            text(10.0f, 114.0f, line);
+        }
+        if (m_gpuView) {
+            const auto& st = m_gpuView->settings;
+            std::snprintf(line, sizeof(line), "Vulkan PBR | F7 depth of field: %s | F8 AO+contact: %s | F9 bloom: %s",
+                          st.dof ? "on" : "off", st.ssao ? "on" : "off", st.bloom ? "on" : "off");
+        } else {
+            std::snprintf(line, sizeof(line), "software renderer (debug)");
+        }
+        text(10.0f, 100.0f, line);
         if (m_showHelp) {
-            text(10.0f, 44.0f, "Left-drag block: carry | Shift+mouse/wheel: lift | Ctrl+mouse: turn | hold Space: align | Q/E/R: 90 deg");
-            text(10.0f, 58.0f, "WASD: move | right-drag: orbit | middle/Shift+right-drag: pan | wheel: zoom");
-            text(10.0f, 72.0f, "1-9: new block at cursor | C: recolor | O: beech/oak | F2-F6: scenes | Del: clear");
-            text(10.0f, 86.0f, "Ctrl+Z: undo | Ctrl+Y: redo | P: pause | M: mute | F1: help | Esc: quit");
+            text(10.0f, 44.0f, "Shelf: press a block to take it, release to drop | Tab: hide shelf | 1-9 also create at cursor");
+            text(10.0f, 58.0f, "Holding: Q/E turn, R/F tip (tap 1 deg, hold = continuous, Shift = 90) | Ctrl+wheel 1 deg | Ctrl(+Shift)+mouse free/fine");
+            text(10.0f, 72.0f, "Shift+mouse or wheel: lift | hold Space: align | WASD move | right-drag orbit | middle-drag pan | wheel zoom");
+            text(10.0f, 86.0f, "C recolor | O beech/oak | F2-F6 scenes | Del clear | Ctrl+Z/Y undo/redo | P pause | M mute | F11 fullscreen");
         }
     }
 
     simulation::Simulation m_sim;
     viewer::OrbitCamera m_camera;
-    viewer::DebugRenderer m_draw;
+    std::unique_ptr<viewer::GpuView> m_gpuView;      // PBR renderer (Vulkan)
+    std::unique_ptr<viewer::DebugRenderer> m_draw;   // software fallback
+    SDL_Window* m_window = nullptr;
+    viewer::Shelf m_shelf;
+    double m_clock = 0.0;
+    std::array<double, 4> m_keyPressTime{}; // Q, E, R, F
     SDL_Renderer* m_renderer;
     audio::ImpactSynth m_synth;
     std::unique_ptr<AudioOutput> m_audio;
@@ -518,10 +657,33 @@ int main(int argc, char** argv) {
     }
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (opt.hidden) flags |= SDL_WINDOW_HIDDEN;
+    const char* title = "WOODYN - Real Wood. Real Physics.";
 
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("WOODYN - Real Wood. Real Physics.", 1280, 800, flags, &window, &renderer)) {
+    SDL_GPUDevice* device = nullptr;
+    SDL_Texture* offscreen = nullptr;
+    if (opt.renderer == "gpu") {
+        // SDL3 GPU API (Vulkan): our renderer draws the 3D image, an SDL GPU
+        // renderer on the same device composites it with the HUD and presents.
+        device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr);
+        if (device) {
+            if (!opt.hidden) window = SDL_CreateWindow(title, 1280, 800, flags);
+            renderer = SDL_CreateGPURenderer(device, window); // no window -> offscreen
+            if (renderer && opt.hidden) {
+                offscreen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, 1280, 800);
+                SDL_SetRenderTarget(renderer, offscreen);
+            }
+        }
+        if (!renderer) {
+            log::warn("GPU renderer unavailable ({}), using the software renderer", SDL_GetError());
+            if (window) SDL_DestroyWindow(window);
+            if (device) SDL_DestroyGPUDevice(device);
+            window = nullptr;
+            device = nullptr;
+        }
+    }
+    if (!renderer && !SDL_CreateWindowAndRenderer(title, 1280, 800, flags, &window, &renderer)) {
         log::error("SDL_CreateWindowAndRenderer failed: {}", SDL_GetError());
         SDL_Quit();
         return 1;
@@ -531,7 +693,7 @@ int main(int argc, char** argv) {
 
     int exitCode = 0;
     {
-        App app(renderer, opt.mute);
+        App app(renderer, window, device, opt.mute);
         app.loadScene(opt.scene, false);
         if (opt.zoom > 0.0f) app.camera().distance = opt.zoom;
         if (opt.yaw > -99.0f) app.camera().yaw = opt.yaw;
@@ -570,8 +732,10 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (offscreen) SDL_DestroyTexture(offscreen);
     SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
+    if (window) SDL_DestroyWindow(window);
+    if (device) SDL_DestroyGPUDevice(device);
     SDL_Quit();
     return exitCode;
 }

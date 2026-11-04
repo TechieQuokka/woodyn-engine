@@ -158,4 +158,80 @@ Room buildPlayroom(const Skin& skin, const simulation::PlayArea* area) {
     return room;
 }
 
+namespace {
+
+void gpuQuad(std::vector<render::RoomVertex>& out, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
+             const glm::vec3& d, const glm::vec3& n, const glm::vec3& albedo, float roughness, float material) {
+    const glm::vec4 ar(albedo, roughness);
+    for (const glm::vec3& p : {a, b, c, a, c, d}) out.push_back({p, n, ar, material});
+}
+
+void gpuWall(std::vector<render::RoomVertex>& out, const Skin& skin, const glm::vec3& origin, const glm::vec3& along,
+             const glm::vec3& normal, float width, float height) {
+    const glm::vec3 up{0.0f, 1.0f, 0.0f};
+    constexpr int kRows = 12;
+    for (int j = 0; j < kRows; ++j) {
+        const float y0 = height * static_cast<float>(j) / kRows;
+        const float y1 = height * static_cast<float>(j + 1) / kRows;
+        const float t = (y0 + y1) * 0.5f / height;
+        const glm::vec3 c = y1 <= 0.12f ? skin.baseboard : glm::mix(skin.wallBottom, skin.wallTop, t);
+        gpuQuad(out, origin + up * y0, origin + along * width + up * y0, origin + along * width + up * y1,
+                origin + up * y1, normal, lin(c), y1 <= 0.12f ? 0.45f : 0.85f, 0.0f);
+    }
+    const glm::vec3 inward = normal * 0.002f;
+    for (int i = 1; i < static_cast<int>(width / 0.42f); ++i) {
+        for (int j = 1; j < 5; ++j) {
+            const std::uint32_t h = hash(i, j + static_cast<int>(origin.x * 10.0f + origin.z * 7.0f));
+            const float cx = static_cast<float>(i) * 0.42f + ((j % 2) ? 0.21f : 0.0f);
+            if (cx > width - 0.1f) continue;
+            const float cy = 0.35f + static_cast<float>(j) * 0.36f;
+            const float r = 0.045f + 0.02f * static_cast<float>(h % 3);
+            const glm::vec3 center = origin + along * cx + up * cy + inward;
+            const glm::vec4 ar(lin(skin.dots[h % skin.dots.size()]), 0.8f);
+            constexpr int kSeg = 24;
+            for (int k = 0; k < kSeg; ++k) {
+                const float a0 = glm::two_pi<float>() * static_cast<float>(k) / kSeg;
+                const float a1 = glm::two_pi<float>() * static_cast<float>(k + 1) / kSeg;
+                out.push_back({center, normal, ar, 0.0f});
+                out.push_back({center + (along * std::cos(a0) + up * std::sin(a0)) * r, normal, ar, 0.0f});
+                out.push_back({center + (along * std::cos(a1) + up * std::sin(a1)) * r, normal, ar, 0.0f});
+            }
+        }
+    }
+}
+
+} // namespace
+
+std::vector<render::RoomVertex> buildGpuRoom(const Skin& skin, const simulation::PlayArea& area) {
+    std::vector<render::RoomVertex> out;
+    const float R = 2.4f;
+    constexpr float kWallHeight = 2.4f;
+    gpuWall(out, skin, {-R, -0.03f, -R}, {1, 0, 0}, {0, 0, 1}, 2.0f * R, kWallHeight);
+    gpuWall(out, skin, {R, -0.03f, R}, {-1, 0, 0}, {0, 0, -1}, 2.0f * R, kWallHeight);
+    gpuWall(out, skin, {R, -0.03f, -R}, {0, 0, 1}, {-1, 0, 0}, 2.0f * R, kWallHeight);
+    gpuWall(out, skin, {-R, -0.03f, R}, {0, 0, -1}, {1, 0, 0}, 2.0f * R, kWallHeight);
+
+    // EVA mat: tiles (top at y = 0) plus the cut edge all around.
+    const float h = area.halfSize;
+    const int tiles = std::max(1, static_cast<int>(std::round(2.0f * h / 0.3f)));
+    const float size = 2.0f * h / static_cast<float>(tiles);
+    const glm::vec3 up{0.0f, 1.0f, 0.0f};
+    for (int ix = 0; ix < tiles; ++ix) {
+        for (int iz = 0; iz < tiles; ++iz) {
+            const glm::vec3 c = lin(skin.matTiles[static_cast<std::size_t>((ix + 2 * iz) % 4)]);
+            // Shared edges computed identically on both sides: no cracks.
+            const float x0 = -h + static_cast<float>(ix) * size, x1 = -h + static_cast<float>(ix + 1) * size;
+            const float z0 = -h + static_cast<float>(iz) * size, z1 = -h + static_cast<float>(iz + 1) * size;
+            gpuQuad(out, {x0, 0.0f, z0}, {x0, 0.0f, z1}, {x1, 0.0f, z1}, {x1, 0.0f, z0}, up, c, 0.92f, 1.0f);
+        }
+    }
+    const float b = -kMatThickness;
+    const glm::vec3 edge = lin(skin.matTiles[0]) * 0.9f;
+    gpuQuad(out, {-h, b, h}, {h, b, h}, {h, 0, h}, {-h, 0, h}, {0, 0, 1}, edge, 0.92f, 1.0f);
+    gpuQuad(out, {h, b, -h}, {-h, b, -h}, {-h, 0, -h}, {h, 0, -h}, {0, 0, -1}, edge, 0.92f, 1.0f);
+    gpuQuad(out, {h, b, h}, {h, b, -h}, {h, 0, -h}, {h, 0, h}, {1, 0, 0}, edge, 0.92f, 1.0f);
+    gpuQuad(out, {-h, b, -h}, {-h, b, h}, {-h, 0, h}, {-h, 0, -h}, {-1, 0, 0}, edge, 0.92f, 1.0f);
+    return out;
+}
+
 } // namespace woodyn::viewer

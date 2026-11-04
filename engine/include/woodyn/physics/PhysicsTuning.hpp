@@ -71,8 +71,12 @@ struct PhysicsTuning {
     /// from 1 m moves ~3.7 cm per 120 Hz step, more than its own size.
     bool continuousCollision = true;
 
-    // --- Rolling resistance (D-21) -------------------------------------------------
+    // --- Rolling resistance (D-21, D-46) and soft surfaces (D-47) -----------------------
     bool rollingResistance = true;
+    /// Contacts with soft surfaces approaching faster than this [m/s] are impacts;
+    /// after each step with such an impact the body keeps this fraction of its spin.
+    float softImpactSpeed = 0.15f;
+    float softImpactSpinRetention = 0.5f;
 
     // --- Grab-and-drag (D-09, D-20) ----------------------------------------------------
     float grabFrequencyHz = 8.0f;        // spring stiffness of the "hand"

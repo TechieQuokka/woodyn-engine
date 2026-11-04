@@ -440,7 +440,7 @@ The following items require experimentation or further discussion before impleme
 4. Blending method between cut-face and side-face textures
 5. ~~Target block count and reference hardware~~ — resolved, see §15 (D-10)
 6. Benchmark of Jolt Physics vs. PhysX under identical conditions
-7. Initial feature scope of the Vulkan renderer
+7. ~~Initial feature scope of the Vulkan renderer~~ — resolved, see §15 (D-37, D-38)
 8. Real wood samples and measurement methods for validating physics accuracy
 
 ---
@@ -529,19 +529,46 @@ Made autonomously during the non-stop Phase 1–2 run, backed by measurements.
 | D-35 | End grain & stain on grain | `endGrainFactor` = smoothstep of \|normal · fiber\| between 0.55 and 0.85 (smooth over rounded edges). End grain is 16 % darker and soaks up more dye. `wood::surfaceAlbedo` (grain → end grain → stain) is the single source of truth for every renderer; the Vulkan shader (Phase 4) must port it. | 2026-11-04 |
 | D-36 | Grain in the debug viewer | Per-block grain textures baked once into a 4096² atlas: each block type's mesh is unwrapped into charts by dominant face direction (0.5 mm texels, 2-texel dilation); texels store block-local surface points and normals, so baking samples the exact surface. Parallel baking; atlas re-packs when full. F6 = grain demo scene. | 2026-11-04 |
 
-### Known Issues / Open Items (after Phase 3)
+### Phase 4 Decisions — GPU Renderer
 
-- **Grain is procedural:** photo-based albedo/normal/roughness (D-08, CC0) and photo-matched species parameters come with the Vulkan renderer (Phase 4).
-- **Grain detail limit:** 0.5 mm atlas texels blur the finest ray flecks; the atlas holds ~300 unique blocks before re-packing (1,000-block scenes fall back to flat stain color for the rest).
+| ID   | Topic               | Decision | Date |
+| ---- | ------------------- | -------- | ---- |
+| D-37 | Graphics API (user choice) | **SDL3 GPU API** (Vulkan backend on Linux) instead of raw Vulkan: far less code, same SPIR-V shaders, enough features (instancing, MSAA, shadow maps, compute). An SDL GPU renderer on the same device composites the 3D image with the HUD and handles presentation and headless screenshots. SDL GPU normalizes NDC to +Y up and texture UV (0,0) to top-left on every backend. Resolves §13 item 7. | 2026-11-04 |
+| D-38 | Feature scope (user choice C) | Sun shadow map 4096² (0.44 mm texels) with 16-tap Poisson PCF; depth/normal prepass; SSAO (16 samples, 2.2 cm radius) + screen-space contact shadows (1.2 cm march) with depth-aware blur; MSAA 4× HDR (RGBA16F) forward pass; GGX/Smith PBR with clear-coat lacquer; IBL; thin-lens depth of field ("tilt-shift" miniature look); 5-level bloom; Khronos PBR Neutral tone mapping (keeps toy colors true) + vignette. F7/F8/F9 toggle DOF / AO+contact / bloom. | 2026-11-04 |
+| D-39 | Grain on the GPU (user choice: hybrid, staged) | Stage 1 (done): `wood::surfaceAlbedo` ported to GLSL and evaluated per pixel (no resolution or block-count limit), plus micro-relief normals from latewood/fiber height (finite differences in log space) and grain-driven roughness (latewood/rays smoother, end grain rougher). Bit-compatible integer hashing; a compute-shader probe test compares 600 GPU samples with the CPU reference (≥ 97 % within 2/255). Stage 2 (next): CC0 photo micro-detail layer (D-08). | 2026-11-04 |
+| D-40 | Lighting setup | Warm sun through a window (direction (−0.45, 1, 0.35), radiance ≈ 3); IBL from an analytic playroom radiance model (cream walls, oak floor, white ceiling, bright window) prefiltered on the CPU into a 64² GGX cubemap mip chain + SH9 irradiance; Karis analytic environment BRDF. Toy blocks: satin base (roughness ≈ 0.46) + 0.55 clear coat (0.22); floorboards: varnish (coat 0.9, 0.12). | 2026-11-04 |
+| D-41 | Room in PBR | Oak floorboards (staggered 36 × 12 cm planks) and the beech fence are wood instances using the grain shader; walls are painted (roughness 0.85) with polka dots; the EVA mat is 1 cm thick with closed-cell speckle, soft relief and 1 mm seams between 30 cm tiles. | 2026-11-04 |
+| D-42 | Shaders & renderer selection | GLSL 4.60 → SPIR-V via glslc at build time (`build/shaders`). `woodyn_viewer` uses the GPU renderer by default; `--renderer soft` keeps the software debug renderer (also the automatic fallback without Vulkan). GPU tests (`woodyn_gpu_tests`, label `gpu`) skip when no device exists. | 2026-11-04 |
+
+### Interaction Refinements (after Phase 4, stage 1)
+
+| ID   | Topic               | Decision | Date |
+| ---- | ------------------- | -------- | ---- |
+| D-43 | Toy shelf (user choice) | A shelf at the bottom of the screen shows the 9 block shapes as shaded icons in the color the next block will get, plus the 7 color swatches. Pressing a shape spawns the block on the mat under the pointer and puts it straight into the hand (release to drop); swatches pick the next color. Tab hides the shelf; 1–9 keep working. | 2026-11-04 |
+| D-44 | Fine rotation (user request) | While holding: Q/E turn about the vertical, R/F tip about the horizontal axis closest to the camera's right. A tap turns **1°**; holding keeps turning after 0.3 s at 20°/s ramping to 90°/s; Shift = 90° steps. Ctrl+wheel = 1° per notch; Ctrl+mouse turns freely (0.004 rad/px), Ctrl+Shift+mouse is 4× finer. The HUD shows heading and tilt in degrees. | 2026-11-04 |
+| D-45 | Fullscreen | F11 toggles fullscreen; the GPU renderer and the composited texture follow the new output size. | 2026-11-04 |
+
+### Landing Feel (user report: tilted blocks did not settle naturally)
+
+Measured: a cube dropped at 25° onto the mat hit with a corner, flipped onto a face, then **rocked back up 19° over the leading edge** before settling (0.17 s of wobble). Final poses were always correct; the motion was what looked wrong. Rigid-floor physics is right for wood on wood, but an EVA foam mat compresses and swallows the rotational kick.
+
+| ID   | Topic               | Decision | Date |
+| ---- | ------------------- | -------- | ---- |
+| D-46 | Surface rolling resistance | Rolling resistance uses max(c_rr of the block, c_rr of the touched surface): foam mat 0.08, wood 0.006 (PROVISIONAL). Measured alone it barely reduced the rocking (19° → 13–15°) while strongly limiting rolling at higher values, so it stays moderate. | 2026-11-04 |
+| D-47 | Soft-impact absorption | Contacts with a **soft** surface (the foam mat) approaching faster than 0.15 m/s mark the block; after that step it keeps 50 % of its spin. Slow contacts (resting, gravity tipping, rolling) are untouched. Result: worst rebound 14.9° → 2.2°, at rest 35 ms after landing flat, tip-over onto the face within ~50 ms, rolling distance unchanged. Tried and rejected: restitution 0 (no effect: rebound 16.4°) and reduced inverse inertia on soft contacts (rebound 44.9°: the floor then cannot stop the spin). Regression tests: `SoftLanding.*`. | 2026-11-04 |
+
+### Known Issues / Open Items (after Phase 4, stage 1)
+
+- **Photo micro-detail (D-39 stage 2):** CC0 wood photo textures still to be sourced and blended in (pores, fine fibers, roughness detail).
+- **Side grain reads slightly regular** at grazing angles (procedural rings/streaks); stage 2 should break it up.
+- **No GPU frustum culling / LOD yet:** fine for the 1,000-block target on the RTX 3060, revisit in Phase 5.
 - **Sound calibration:** mode tables are perceptual estimates; no sliding/rolling sounds yet.
 - **Very tall towers:** 20-cube towers need ≥ 600 Hz (D-11).
 - **Static vs kinetic friction:** single coefficient (D-15).
-- **Debug viewer limits:** painter's algorithm, floor-only shadows.
 - **Material values:** all physical properties are provisional (§3.3, §11).
 
 ### Deferred Decisions
 
 To be decided when the relevant phase begins:
 
-- Initial feature scope of the Vulkan renderer (§13, item 7)
 - Project license

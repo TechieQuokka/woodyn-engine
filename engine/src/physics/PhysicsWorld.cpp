@@ -78,6 +78,20 @@ glm::quat fromJolt(JPH::QuatArg q) { return {q.GetW(), q.GetX(), q.GetY(), q.Get
 
 JPH::BodyID toJolt(BodyId id) { return JPH::BodyID(id.value); }
 
+// Body user data (D-46): low 32 bits = rolling resistance coefficient c_rr of
+// the body's own material; high 32 bits = rolling radius (Jolt units) for
+// blocks, or 1.0 for static surfaces that are soft (foam mat).
+std::uint64_t packRolling(float crr, float radius) {
+    return (static_cast<std::uint64_t>(std::bit_cast<std::uint32_t>(radius)) << 32) |
+           std::bit_cast<std::uint32_t>(crr);
+}
+float rollingCoefficient(const JPH::Body& b) {
+    return std::bit_cast<float>(static_cast<std::uint32_t>(b.GetUserData() & 0xffffffffu));
+}
+float rollingRadius(const JPH::Body& b) {
+    return std::bit_cast<float>(static_cast<std::uint32_t>(b.GetUserData() >> 32));
+}
+
 /// Remembers which dynamic bodies touched anything during the last step.
 /// Jolt calls the listener from worker threads, hence the atomics.
 class ContactTracker final : public JPH::ContactListener {
@@ -89,23 +103,28 @@ public:
         float speed; // Jolt units
     };
 
-    explicit ContactTracker(std::uint32_t maxBodies) : m_flags(maxBodies) {}
+    explicit ContactTracker(std::uint32_t maxBodies) : m_touch(maxBodies), m_softHit(maxBodies) {}
 
-    void configure(float minSpeed, float persistedMinSpeed) {
+    void configure(float minSpeed, float persistedMinSpeed, float softImpactSpeed) {
         m_minSpeed = minSpeed;
         m_persistedMinSpeed = persistedMinSpeed;
+        m_softImpactSpeed = softImpactSpeed;
     }
 
     void OnContactAdded(const JPH::Body& a, const JPH::Body& b, const JPH::ContactManifold& m,
-                        JPH::ContactSettings&) override {
-        mark(a);
-        mark(b);
+                        JPH::ContactSettings& settings) override {
+        mark(a, b);
+        mark(b, a);
+        (void)settings;
+        markSoftImpact(a, b, m);
         recordImpact(a, b, m, m_minSpeed);
     }
     void OnContactPersisted(const JPH::Body& a, const JPH::Body& b, const JPH::ContactManifold& m,
-                            JPH::ContactSettings&) override {
-        mark(a);
-        mark(b);
+                            JPH::ContactSettings& settings) override {
+        mark(a, b);
+        mark(b, a);
+        (void)settings;
+        markSoftImpact(a, b, m);
         recordImpact(a, b, m, m_persistedMinSpeed);
     }
 
@@ -116,12 +135,39 @@ public:
         return out;
     }
 
-    /// Returns whether the body touched something, and clears the flag.
-    bool consume(JPH::BodyID id) {
-        return m_flags[id.GetIndex()].exchange(0, std::memory_order_relaxed) != 0;
+    /// Whether the body hit a soft surface fast during the last step (clears it).
+    bool consumeSoftImpact(JPH::BodyID id) {
+        return m_softHit[id.GetIndex()].exchange(0, std::memory_order_relaxed) != 0;
+    }
+
+    /// Largest rolling resistance coefficient among the contacts of the last
+    /// step (0 if the body touched nothing), and clears it.
+    float consume(JPH::BodyID id) {
+        return std::bit_cast<float>(m_touch[id.GetIndex()].exchange(0u, std::memory_order_relaxed));
     }
 
 private:
+    static bool isSoftSurface(const JPH::Body& b) { return b.IsStatic() && rollingRadius(b) > 0.5f; }
+
+    /// Soft foam (D-47): marks dynamic bodies that hit a soft surface fast
+    /// during this step (any contact point approaching faster than the
+    /// threshold). Their spin is partly absorbed after the step, as real foam
+    /// swallows the rotational kick of an impact. Slow contacts (resting,
+    /// tipping under gravity) are not affected.
+    void markSoftImpact(const JPH::Body& a, const JPH::Body& b, const JPH::ContactManifold& m) {
+        const bool softA = isSoftSurface(a);
+        const bool softB = isSoftSurface(b);
+        if (softA == softB) return;
+        float approach = 0.0f;
+        for (JPH::uint i = 0; i < m.mRelativeContactPointsOn1.size(); ++i) {
+            const JPH::RVec3 p = m.GetWorldSpaceContactPointOn1(i);
+            approach = std::max(approach, (a.GetPointVelocity(p) - b.GetPointVelocity(p)).Dot(m.mWorldSpaceNormal));
+        }
+        if (approach < m_softImpactSpeed) return;
+        const JPH::Body& dyn = softA ? b : a;
+        if (dyn.IsDynamic()) m_softHit[dyn.GetID().GetIndex()].store(1, std::memory_order_relaxed);
+    }
+
     void recordImpact(const JPH::Body& a, const JPH::Body& b, const JPH::ContactManifold& m,
                       float threshold) {
         if (m.mRelativeContactPointsOn1.empty()) return;
@@ -133,14 +179,23 @@ private:
         if (m_impacts.size() < 4096) m_impacts.push_back({a.GetID(), b.GetID(), p, approach});
     }
 
-    void mark(const JPH::Body& body) {
-        if (body.IsDynamic()) {
-            m_flags[body.GetID().GetIndex()].store(1, std::memory_order_relaxed);
+    /// Records that `body` touched `other` with the combined coefficient
+    /// max(c_rr body, c_rr other): a soft surface dominates (D-46).
+    void mark(const JPH::Body& body, const JPH::Body& other) {
+        if (!body.IsDynamic()) return;
+        const float c = std::max({rollingCoefficient(body), rollingCoefficient(other), 1e-9f});
+        // Positive floats order like their bit patterns: atomic max via CAS.
+        const std::uint32_t bits = std::bit_cast<std::uint32_t>(c);
+        auto& slot = m_touch[body.GetID().GetIndex()];
+        std::uint32_t cur = slot.load(std::memory_order_relaxed);
+        while (bits > cur && !slot.compare_exchange_weak(cur, bits, std::memory_order_relaxed)) {
         }
     }
-    std::vector<std::atomic<std::uint8_t>> m_flags;
+    std::vector<std::atomic<std::uint32_t>> m_touch;
+    std::vector<std::atomic<std::uint8_t>> m_softHit;
     float m_minSpeed = 0.03f;
     float m_persistedMinSpeed = 0.3f;
+    float m_softImpactSpeed = 0.15f;
     std::mutex m_impactMutex;
     std::vector<RawImpact> m_impacts;
 };
@@ -183,7 +238,7 @@ struct PhysicsWorld::Impl {
                                         const JPH::SubShapeID&) {
             return std::min(a.GetRestitution(), b.GetRestitution());
         });
-        contacts.configure(t.impactMinSpeed * scale, t.impactPersistedMinSpeed * scale);
+        contacts.configure(t.impactMinSpeed * scale, t.impactPersistedMinSpeed * scale, t.softImpactSpeed * scale);
 
         JPH::PhysicsSettings s;
         s.mBaumgarte = t.baumgarte;
@@ -304,12 +359,23 @@ struct PhysicsWorld::Impl {
         system.GetActiveBodies(JPH::EBodyType::RigidBody, active);
         const float g = units::kStandardGravity * scale;
         for (const JPH::BodyID id : active) {
-            if (!contacts.consume(id) || (grab && grab->body == id)) continue;
+            const bool softHit = contacts.consumeSoftImpact(id);
+            const float crr = contacts.consume(id);
+            if (grab && grab->body == id) continue;
+            if (softHit) {
+                // Foam swallows part of the impact's spin (D-47).
+                JPH::BodyLockWrite soft(system.GetBodyLockInterface(), id);
+                if (soft.Succeeded() && soft.GetBody().IsDynamic()) {
+                    JPH::Body& sb = soft.GetBody();
+                    sb.SetAngularVelocity(sb.GetAngularVelocity() * tuning.softImpactSpinRetention);
+                }
+            }
+            if (crr <= 0.0f) continue;
             JPH::BodyLockWrite lock(system.GetBodyLockInterface(), id);
             if (!lock.Succeeded()) continue;
             JPH::Body& body = lock.GetBody();
             if (!body.IsDynamic()) continue;
-            const float lever = std::bit_cast<float>(static_cast<std::uint32_t>(body.GetUserData()));
+            const float lever = crr * rollingRadius(body);
             const JPH::Vec3 omega = body.GetAngularVelocity();
             const float speed = omega.Length();
             if (lever <= 0.0f || speed < 1e-6f) continue;
@@ -354,9 +420,8 @@ BodyId PhysicsWorld::addBlock(blocks::BlockType type, materials::WoodSpecies spe
     settings.mAngularDamping = m_impl->tuning.angularDamping;
     settings.mMotionQuality = m_impl->tuning.continuousCollision ? JPH::EMotionQuality::LinearCast
                                                                  : JPH::EMotionQuality::Discrete;
-    // Rolling lever c_rr * r (Jolt units), r = the shape's inner radius.
-    const float lever = props.rollingResistance * shape->GetInnerRadius();
-    settings.mUserData = std::bit_cast<std::uint32_t>(lever);
+    // Rolling resistance: own c_rr and rolling radius (the shape's inner radius).
+    settings.mUserData = packRolling(props.rollingResistance, shape->GetInnerRadius());
 
     const JPH::BodyID id = m_impl->bodies().CreateAndAddBody(settings, JPH::EActivation::Activate);
     if (id.IsInvalid()) {
@@ -374,6 +439,7 @@ BodyId PhysicsWorld::addStaticBox(const glm::vec3& halfExtents, const Transform&
                                        JPH::EMotionType::Static, Layers::kStatic);
     settings.mFriction = surface.friction;
     settings.mRestitution = surface.restitution;
+    settings.mUserData = packRolling(surface.rollingResistance, surface.soft ? 1.0f : 0.0f);
     const JPH::BodyID id =
         m_impl->bodies().CreateAndAddBody(settings, JPH::EActivation::DontActivate);
     if (id.IsInvalid()) {

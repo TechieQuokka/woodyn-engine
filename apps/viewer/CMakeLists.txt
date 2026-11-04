@@ -6,6 +6,8 @@ add_executable(woodyn_viewer
     DebugRenderer.cpp
     Playroom.cpp
     GrainAtlas.cpp
+    GpuView.cpp
+    Shelf.cpp
 )
-target_link_libraries(woodyn_viewer PRIVATE woodyn::engine SDL3::SDL3)
+target_link_libraries(woodyn_viewer PRIVATE woodyn::engine woodyn::renderer SDL3::SDL3)
 woodyn_set_warnings(woodyn_viewer)

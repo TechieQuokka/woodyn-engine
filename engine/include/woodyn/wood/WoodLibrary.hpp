@@ -30,6 +30,10 @@ public:
     /// Cuts the next block of `type` from the current plank of `species`.
     WoodCut cut(blocks::BlockType type, materials::WoodSpecies species, FiberAxis axis = FiberAxis::Longest);
 
+    /// Cuts an arbitrary box (e.g. floorboards, fence rails) of the given half
+    /// extents; fibers follow `fiberAxis` (0 = X, 1 = Y, 2 = Z).
+    WoodCut cutBox(const glm::vec3& halfExtents, materials::WoodSpecies species, int fiberAxis);
+
     /// Moves `species` to a fresh plank so the next cuts form one continuous run.
     void startRun(materials::WoodSpecies species);
 

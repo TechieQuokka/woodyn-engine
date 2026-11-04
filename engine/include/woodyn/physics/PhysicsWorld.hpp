@@ -31,6 +31,11 @@ struct BodyId {
 struct SurfaceProperties {
     float friction = 0.5f;
     float restitution = 0.5f;
+    /// Rolling/rocking resistance of the surface. Soft surfaces (foam) absorb
+    /// rolling and rocking far more than hard wood (D-46).
+    float rollingResistance = 0.0f;
+    /// Soft, compliant surface (foam): absorbs the rotational kick of impacts (D-47).
+    bool soft = false;
 };
 
 /// Result of a ray cast against the physics world.

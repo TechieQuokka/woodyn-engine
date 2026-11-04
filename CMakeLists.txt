@@ -24,6 +24,9 @@ include(Dependencies)
 
 add_subdirectory(engine)
 add_subdirectory(apps/bench)
+if(WOODYN_BUILD_VIEWER)
+    add_subdirectory(renderer)
+endif()
 
 if(WOODYN_BUILD_VIEWER)
     add_subdirectory(apps/viewer)
