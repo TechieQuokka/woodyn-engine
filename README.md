@@ -110,7 +110,8 @@ Headless tools:
 | `F2`–`F6` · `Shift+Delete` | scenes (tower, house, showcase, pile, grain) · clear everything |
 | `Ctrl+Z` / `Ctrl+Y` | undo / redo |
 | `F7` `F8` `F9` `F10` | depth of field · AO + contact shadows · bloom · photo wood detail |
-| `F11` · `P` · `M` · `F1` · `Esc` | fullscreen · pause · mute · help · quit |
+| `F11` · `P` · `M` · `Esc` | fullscreen · pause · mute · quit |
+| `F1` | show / hide the HUD (status, controls, render settings); hidden at start |
 
 ## Project layout
 

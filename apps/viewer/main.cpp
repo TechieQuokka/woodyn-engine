@@ -294,7 +294,7 @@ public:
             else if (k == SDLK_DELETE) deleteHeldOrHovered();
             else if (k == SDLK_P) m_sim.paused = !m_sim.paused;
             else if (k == SDLK_M) m_muted = !m_muted;
-            else if (k == SDLK_F1) m_showHelp = !m_showHelp;
+            else if (k == SDLK_F1) m_showHud = !m_showHud;
             else if (k == SDLK_Q || k == SDLK_E || k == SDLK_R || k == SDLK_F) {
                 // Tap: 1 deg. Hold: continuous turning (see turnWhileKeysHeld). Shift: 90 deg.
                 const float sign = (k == SDLK_Q || k == SDLK_R) ? 1.0f : -1.0f;
@@ -693,18 +693,11 @@ private:
 
     void drawHud() {
         char line[256];
-        std::snprintf(line, sizeof(line), "WOODYN | %.0f fps | physics %.2f ms @ %.0f Hz | blocks %zu (active %u)%s",
-                      m_fps, m_physicsMs, static_cast<double>(m_sim.world().tuning().stepHz),
-                      m_sim.blocks().size(), m_sim.world().activeBodyCount(), m_sim.paused ? " | PAUSED" : "");
-        text(10.0f, 10.0f, line);
-        std::snprintf(line, sizeof(line), "%s | next color: %s | sound: %s%s",
-                      std::string(materials::toString(m_species)).c_str(),
-                      std::string(materials::toString(m_nextStain)).c_str(),
-                      m_muted ? "muted" : (m_audio && m_audio->ok() ? "on" : "unavailable"),
-                      m_sim.world().grabbedBody() ? " | HOLDING" : "");
-        text(10.0f, 24.0f, line);
+        if (m_showHud) drawHudPanel();
+        else text(10.0f, 10.0f, "F1: help");
         if (rotating()) {
             // Orientation readout for 1-degree adjustments: heading and tilt.
+            // Shown even with the HUD hidden: it is part of the rotate controls.
             const glm::quat q = m_placement ? m_placement->rotation : m_targetRotation;
             const glm::vec3 x = q * glm::vec3(1, 0, 0);
             const glm::vec3 up = q * glm::vec3(0, 1, 0);
@@ -715,8 +708,23 @@ private:
                           m_placement ? std::string(blocks::toString(m_placement->type)).c_str() : "holding",
                           static_cast<double>(heading), static_cast<double>(tilt),
                           m_placement ? " | click: place, Shift+click: place more, right-click/Esc: cancel" : "");
-            text(10.0f, 114.0f, line);
+            text(10.0f, m_showHud ? 114.0f : 24.0f, line);
         }
+    }
+
+    /// The full HUD (F1): status, controls and render settings.
+    void drawHudPanel() {
+        char line[256];
+        std::snprintf(line, sizeof(line), "WOODYN | %.0f fps | physics %.2f ms @ %.0f Hz | blocks %zu (active %u)%s",
+                      m_fps, m_physicsMs, static_cast<double>(m_sim.world().tuning().stepHz),
+                      m_sim.blocks().size(), m_sim.world().activeBodyCount(), m_sim.paused ? " | PAUSED" : "");
+        text(10.0f, 10.0f, line);
+        std::snprintf(line, sizeof(line), "%s | next color: %s | sound: %s%s",
+                      std::string(materials::toString(m_species)).c_str(),
+                      std::string(materials::toString(m_nextStain)).c_str(),
+                      m_muted ? "muted" : (m_audio && m_audio->ok() ? "on" : "unavailable"),
+                      m_sim.world().grabbedBody() ? " | HOLDING" : "");
+        text(10.0f, 24.0f, line);
         if (m_gpuView) {
             const auto& st = m_gpuView->settings;
             std::snprintf(line, sizeof(line), "Vulkan PBR | F7 depth of field: %s | F8 AO+contact: %s | F9 bloom: %s | F10 photo detail: %s",
@@ -725,12 +733,10 @@ private:
             std::snprintf(line, sizeof(line), "software renderer (debug)");
         }
         text(10.0f, 100.0f, line);
-        if (m_showHelp) {
-            text(10.0f, 44.0f, "Shelf or 1-9: pick a shape, then click to place it | drop a block on the toy box or press Delete to remove | Tab: hide shelf");
-            text(10.0f, 58.0f, "Holding: Q/E turn, R/F tip (tap 1 deg, hold = continuous, Shift = 90) | Ctrl+wheel 1 deg | Ctrl(+Shift)+mouse free/fine");
-            text(10.0f, 72.0f, "Shift+mouse or wheel: lift | hold Space: align | WASD move | right-drag orbit | middle-drag pan | wheel zoom");
-            text(10.0f, 86.0f, "C recolor | O beech/oak | F2-F6 scenes | Shift+Del clear all | Ctrl+Z/Y undo/redo | P pause | M mute | F11 fullscreen");
-        }
+        text(10.0f, 44.0f, "Shelf or 1-9: pick a shape, then click to place it | drop a block on the toy box or press Delete to remove | Tab: hide shelf");
+        text(10.0f, 58.0f, "Holding: Q/E turn, R/F tip (tap 1 deg, hold = continuous, Shift = 90) | Ctrl+wheel 1 deg | Ctrl(+Shift)+mouse free/fine");
+        text(10.0f, 72.0f, "Shift+mouse or wheel: lift | hold Space: align | WASD move | right-drag orbit | middle-drag pan | wheel zoom");
+        text(10.0f, 86.0f, "C recolor | O beech/oak | F2-F6 scenes | Shift+Del clear all | Ctrl+Z/Y undo/redo | P pause | M mute | F11 fullscreen");
     }
 
     simulation::Simulation m_sim;
@@ -755,7 +761,7 @@ private:
     std::uint32_t m_seed = 1;
     double m_physicsMs = 0.0;
     double m_fps = 60.0;
-    bool m_showHelp = true;
+    bool m_showHud = false; // F1: status, controls and render settings
     bool m_muted = false;
     SDL_FPoint m_mouse{-1.0f, -1.0f};
     float m_handHeight = 0.05f;
