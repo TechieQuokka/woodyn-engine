@@ -24,6 +24,7 @@ constexpr std::array kPalette{Stain::Red, Stain::Yellow, Stain::Blue, Stain::Gre
 /// Spawns a block whose bounding-box bottom sits at `bottomY`.
 std::size_t place(Simulation& sim, BlockType type, materials::WoodSpecies species, float x,
                   float bottomY, float z, Stain stain = Stain::Natural,
+                  std::optional<wood::WoodCut> cut = std::nullopt,
                   const glm::quat& rotation = glm::quat(1, 0, 0, 0)) {
     const auto& def = blocks::definition(type);
     // Height of the rotated bounding box (only yaw rotations are used here).
@@ -31,7 +32,7 @@ std::size_t place(Simulation& sim, BlockType type, materials::WoodSpecies specie
     physics::Transform t;
     t.position = {x, bottomY + halfHeight + kSpawnGap, z};
     t.rotation = rotation;
-    return sim.addBlock(type, species, t, stain);
+    return sim.addBlock(type, species, t, stain, cut);
 }
 
 } // namespace
@@ -39,10 +40,14 @@ std::size_t place(Simulation& sim, BlockType type, materials::WoodSpecies specie
 std::vector<std::size_t> buildTower(Simulation& sim, int count, float x, float z,
                                     materials::WoodSpecies species) {
     std::vector<std::size_t> out;
+    // Cut the cubes one after another with vertical fibers, bottom to top: the
+    // stacked tower shows one continuous grain like the beam it came from.
+    sim.wood().startRun(species);
     for (int i = 0; i < count; ++i) {
         const float bottom = static_cast<float>(i) * (u + kSpawnGap);
+        const auto cut = sim.wood().cut(BlockType::Cube, species, wood::FiberAxis::Y);
         out.push_back(place(sim, BlockType::Cube, species, x, bottom, z,
-                            kPalette[static_cast<std::size_t>(i) % kPalette.size()]));
+                            kPalette[static_cast<std::size_t>(i) % kPalette.size()], cut));
     }
     sim.world().optimizeBroadPhase();
     return out;
@@ -109,6 +114,38 @@ std::vector<std::size_t> buildShowcase(Simulation& sim, const glm::vec3& o,
         out.push_back(place(sim, type, species, x, o.y, o.z, kPalette[colorIndex++ % kPalette.size()]));
         x += def.halfExtents.x + u;
     }
+    sim.world().optimizeBroadPhase();
+    return out;
+}
+
+std::vector<std::size_t> buildGrainDemo(Simulation& sim, materials::WoodSpecies species) {
+    std::vector<std::size_t> out;
+    // 1) A row of bricks cut end to end from one plank, laid back together.
+    sim.wood().startRun(species);
+    for (int i = 0; i < 4; ++i) {
+        const auto cut = sim.wood().cut(BlockType::Brick, species, wood::FiberAxis::X);
+        out.push_back(place(sim, BlockType::Brick, species, -0.12f + static_cast<float>(i) * 2.0f * u, 0.0f,
+                            0.12f, Stain::Natural, cut));
+    }
+    // 2) The next bricks from the same plank, in shuffled order: seams show.
+    std::array<wood::WoodCut, 4> cuts{};
+    for (auto& c : cuts) c = sim.wood().cut(BlockType::Brick, species, wood::FiberAxis::X);
+    const std::array<int, 4> order{2, 0, 3, 1};
+    for (int i = 0; i < 4; ++i) {
+        out.push_back(place(sim, BlockType::Brick, species, -0.12f + static_cast<float>(i) * 2.0f * u, 0.0f,
+                            0.04f, Stain::Natural, cuts[static_cast<std::size_t>(order[static_cast<std::size_t>(i)])]));
+    }
+    // 3) A continuous tower and a stained tower (grain shows through the dye).
+    const auto natural = buildTower(sim, 6, -0.09f, -0.08f, species);
+    for (const auto i : natural) sim.setStain(i, Stain::Natural);
+    const auto stained = buildTower(sim, 6, 0.0f, -0.08f, species);
+    for (std::size_t k = 0; k < stained.size(); ++k) sim.setStain(stained[k], kPalette[k % kPalette.size()]);
+    out.insert(out.end(), natural.begin(), natural.end());
+    out.insert(out.end(), stained.begin(), stained.end());
+    // 4) One of each shape in natural beech.
+    const auto shapes = buildShowcase(sim, {-0.4f, 0.0f, -0.25f}, species);
+    for (const auto i : shapes) sim.setStain(i, Stain::Natural);
+    out.insert(out.end(), shapes.begin(), shapes.end());
     sim.world().optimizeBroadPhase();
     return out;
 }

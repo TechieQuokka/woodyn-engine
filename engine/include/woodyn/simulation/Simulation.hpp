@@ -4,6 +4,7 @@
 #include "woodyn/core/FixedTimestep.hpp"
 #include "woodyn/materials/Stain.hpp"
 #include "woodyn/physics/PhysicsWorld.hpp"
+#include "woodyn/wood/WoodLibrary.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -18,6 +19,7 @@ struct BlockInstance {
     blocks::BlockType type{};
     materials::WoodSpecies species{};
     materials::Stain stain = materials::Stain::Natural; // visual only
+    wood::WoodCut cut;                                  // where it was cut from (visual only)
     physics::Transform previous; // state at the previous fixed step
     physics::Transform current;  // state at the latest fixed step
 };
@@ -57,6 +59,7 @@ struct SceneSnapshot {
         blocks::BlockType type{};
         materials::WoodSpecies species{};
         materials::Stain stain{};
+        wood::WoodCut cut;
         physics::Transform transform;
     };
     std::vector<Block> blocks;
@@ -78,9 +81,15 @@ public:
     void addPlayArea(const PlayArea& area = {});
     [[nodiscard]] const std::optional<PlayArea>& playArea() const noexcept { return m_playArea; }
 
+    /// Adds a block. Without an explicit cut, the next piece of the current
+    /// plank of that species is used (every block gets its own real grain).
     std::size_t addBlock(blocks::BlockType type, materials::WoodSpecies species,
                          const physics::Transform& transform,
-                         materials::Stain stain = materials::Stain::Natural);
+                         materials::Stain stain = materials::Stain::Natural,
+                         std::optional<wood::WoodCut> cut = std::nullopt);
+
+    [[nodiscard]] wood::WoodLibrary& wood() noexcept { return m_wood; }
+    [[nodiscard]] const wood::WoodLibrary& wood() const noexcept { return m_wood; }
 
     void setStain(std::size_t index, materials::Stain stain);
 
@@ -121,6 +130,7 @@ private:
                                   const physics::SurfaceProperties& props, audio::SurfaceKind kind);
 
     physics::PhysicsWorld m_world;
+    wood::WoodLibrary m_wood;
     FixedTimestep m_timestep;
     std::vector<BlockInstance> m_blocks;
     std::unordered_map<std::uint32_t, std::size_t> m_indexByBody;

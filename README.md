@@ -5,7 +5,8 @@ SDL3, Vulkan later). Design: [`docs/DESIGN.md`](docs/DESIGN.md). Decisions are
 logged in §15.
 
 **Status:** Phase 1–2 done, plus toy interaction (grab-and-drag, rolling resistance,
-rounded edges) and the playroom (stained colors, impact sounds, enclosed play area, undo).
+rounded edges), the playroom (stained colors, impact sounds, enclosed play area, undo) and
+Phase 3 (log coordinates, procedural grain with continuity across cut blocks).
 
 ## Requirements (Linux)
 
@@ -61,14 +62,14 @@ Viewer controls:
 | Release | drop or throw — a blue ghost previews where it lands |
 | `1`–`9` | new block at the cursor (Cube, Brick, Beam, Roof, Cylinder, HalfCyl, Arch, Cone, Pyramid) |
 | `C` / `O` | recolor held or hovered block / Beech↔Oak |
-| `F2` `F3` `F4` `F5` / `Delete` | tower, house, showcase, pile / clear |
+| `F2` `F3` `F4` `F5` `F6` / `Delete` | tower, house, showcase, pile, grain demo / clear |
 | `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) | undo / redo |
 | `P` / `M` / `F1` / `Esc` | pause / mute / help / quit |
 
 ## Layout
 
 ```text
-engine/include/woodyn/   public headers (core, geometry, blocks, materials, physics, simulation)
+engine/include/woodyn/   public headers (core, geometry, blocks, materials, wood, audio, physics, simulation)
 engine/src/              implementation (Jolt stays private here)
 apps/viewer/             SDL3 debug viewer (temporary, until the Vulkan renderer)
 apps/bench/              headless scenario runner

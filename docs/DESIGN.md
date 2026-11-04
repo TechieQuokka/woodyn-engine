@@ -436,7 +436,7 @@ The following items require experimentation or further discussion before impleme
 
 1. ~~Which wood species to support first: Beech, Oak, or Pine~~ — resolved, see §15 (D-07)
 2. ~~How to photograph textures or secure licenses~~ — resolved, see §15 (D-08)
-3. Reference for the log coordinate system and representation of cut data
+3. ~~Reference for the log coordinate system and representation of cut data~~ — resolved, see §15 (D-32..D-34)
 4. Blending method between cut-face and side-face textures
 5. ~~Target block count and reference hardware~~ — resolved, see §15 (D-10)
 6. Benchmark of Jolt Physics vs. PhysX under identical conditions
@@ -519,14 +519,24 @@ Made autonomously during the non-stop Phase 1–2 run, backed by measurements.
 | D-30 | Playroom skin       | Cream-to-peach walls with pastel polka dots, light oak floorboards, EVA mat tiles in pink/mint/sky blue/lemon, rounded beech fence, warm lighting. Skin colors are data (`viewer::Skin`) so more skins can be added. | 2026-11-04 |
 | D-31 | Controls (user approved) | Camera: WASD, right-drag orbit, middle/Shift+right-drag pan, wheel zoom. Holding: Shift+mouse or wheel lift, Ctrl+mouse turn in hand, Space align, Q/E/R 90° steps. 1–9 spawn at the cursor (cycling colors), C recolor, O species, F2–F5 scenes, Delete clear, **Ctrl+Z / Ctrl+Y undo/redo** (64 snapshots), P pause, M mute. Alt is avoided (GNOME uses Alt+drag). | 2026-11-04 |
 
-### Known Issues / Open Items (after step B)
+### Phase 3 Decisions — Log Coordinates & Grain
 
-- **No wood grain yet:** stained colors are flat; grain (and its visibility through the stain) is Phase 3–4.
+| ID   | Topic               | Decision | Date |
+| ---- | ------------------- | -------- | ---- |
+| D-32 | Log model (`wood::WoodSource`) | A log is a deterministic 3D grain field in log coordinates: +Z along the fibers from one end, X/Y across the section, slightly off-center pith. Default log: Ø 36 cm × 1.2 m. Field: growth rings (distance from pith with slow 3D wobble, per-year width variation, abrupt latewood), medullary ray flecks (beech: many small; oak: fewer), ring-porous pore band (oak), two-scale fiber streaks, large-scale tone variation. Hash-based gradient noise, no tables, reproducible per seed. Species values PROVISIONAL until matched to photos (D-08). | 2026-11-04 |
+| D-33 | Cutting (`wood::WoodLibrary`) | The library ("sawmill") splits each log's section into 6.5 cm plank cells and cuts blocks one after another along a cell with **zero kerf**, so consecutive blocks share their contact faces exactly. Fibers follow the block's longest axis (ties → X) unless requested; the block's up axis points away from the pith, **snapped to the plank grid** (a free radial direction rotated wide blocks out of their cell — caught by tests). New log when full. Every block gets its own cut automatically; towers cut cubes with vertical fibers in stacking order so a tower reads as one beam. | 2026-11-04 |
+| D-34 | Block → log link (`wood::WoodCut`) | Fixed block-local → log transform stored per block (and in undo snapshots). Grain is sampled in block-local coordinates only, so it can never slide when blocks move (§5.2). | 2026-11-04 |
+| D-35 | End grain & stain on grain | `endGrainFactor` = smoothstep of \|normal · fiber\| between 0.55 and 0.85 (smooth over rounded edges). End grain is 16 % darker and soaks up more dye. `wood::surfaceAlbedo` (grain → end grain → stain) is the single source of truth for every renderer; the Vulkan shader (Phase 4) must port it. | 2026-11-04 |
+| D-36 | Grain in the debug viewer | Per-block grain textures baked once into a 4096² atlas: each block type's mesh is unwrapped into charts by dominant face direction (0.5 mm texels, 2-texel dilation); texels store block-local surface points and normals, so baking samples the exact surface. Parallel baking; atlas re-packs when full. F6 = grain demo scene. | 2026-11-04 |
+
+### Known Issues / Open Items (after Phase 3)
+
+- **Grain is procedural:** photo-based albedo/normal/roughness (D-08, CC0) and photo-matched species parameters come with the Vulkan renderer (Phase 4).
+- **Grain detail limit:** 0.5 mm atlas texels blur the finest ray flecks; the atlas holds ~300 unique blocks before re-packing (1,000-block scenes fall back to flat stain color for the rest).
 - **Sound calibration:** mode tables are perceptual estimates; no sliding/rolling sounds yet.
 - **Very tall towers:** 20-cube towers need ≥ 600 Hz (D-11).
 - **Static vs kinetic friction:** single coefficient (D-15).
-- **Rolling resistance normal force:** approximated by m·g.
-- **Debug viewer limits:** painter's algorithm (no depth buffer), shadows only on the floor; walls only visible when looking up.
+- **Debug viewer limits:** painter's algorithm, floor-only shadows.
 - **Material values:** all physical properties are provisional (§3.3, §11).
 
 ### Deferred Decisions

@@ -11,6 +11,10 @@ add_library(woodyn_engine STATIC
     src/physics/PhysicsWorld.cpp
     src/physics/ShapeFactory.cpp
     src/simulation/Simulation.cpp
+    src/wood/Noise.cpp
+    src/wood/WoodSource.cpp
+    src/wood/WoodCut.cpp
+    src/wood/WoodLibrary.cpp
     src/simulation/Scenes.cpp
     src/simulation/ImpactSound.cpp
 )

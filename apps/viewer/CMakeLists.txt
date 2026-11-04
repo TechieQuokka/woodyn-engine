@@ -5,6 +5,7 @@ add_executable(woodyn_viewer
     OrbitCamera.cpp
     DebugRenderer.cpp
     Playroom.cpp
+    GrainAtlas.cpp
 )
 target_link_libraries(woodyn_viewer PRIVATE woodyn::engine SDL3::SDL3)
 woodyn_set_warnings(woodyn_viewer)

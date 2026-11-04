@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GrainAtlas.hpp"
 #include "OrbitCamera.hpp"
 #include "Playroom.hpp"
 
@@ -9,6 +10,7 @@
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -52,21 +54,26 @@ private:
         std::array<SDL_FPoint, 3> screen;
         std::array<SDL_FColor, 3> color;
         float depth;
+        std::array<SDL_FPoint, 3> uv{}; // atlas UVs (textured pass only)
+    };
+
+    /// Texture source for collectBlock: grain atlas layout + block region, or none.
+    struct Texturing {
+        const std::vector<glm::vec2>* uv = nullptr; // per vertex, layout texels
+        glm::vec2 origin{0.0f};                     // block region in the atlas
     };
 
     void ensureTargets(int width, int height);
     void drawBackdrop(const glm::mat4& viewProj);
     void drawShadows(const simulation::Simulation& sim, const glm::mat4& viewProj);
-    void collectBlock(const geometry::RenderMesh& mesh, const glm::mat4& model,
+    void collectBlock(const geometry::RenderMesh& mesh, const Texturing& tex, const glm::mat4& model,
                       const glm::vec3& baseLinear, float highlight, const glm::mat4& viewProj,
                       const glm::vec3& eye, float alpha);
     void drawGhost(const Overlay::Ghost& ghost, const glm::mat4& viewProj, const glm::vec3& eye);
-    void flush(bool sort);
-
-    const geometry::RenderMesh& meshFor(blocks::BlockType type);
+    void flush(bool sort, SDL_Texture* texture = nullptr);
 
     SDL_Renderer* m_renderer;
-    std::array<geometry::RenderMesh, 16> m_meshes; // tessellated per BlockType (painter accuracy)
+    std::unique_ptr<GrainAtlas> m_atlas; // per-block baked wood grain
     SDL_Texture* m_scene = nullptr;   // supersampled color target
     SDL_Texture* m_shadow = nullptr;  // supersampled shadow mask
     int m_targetW = 0;

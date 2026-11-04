@@ -15,6 +15,7 @@ add_executable(woodyn_tests
     physics/ImpactEventTests.cpp
     audio/ImpactSynthTests.cpp
     simulation/SnapshotTests.cpp
+    wood/GrainContinuityTests.cpp
 )
 
 target_include_directories(woodyn_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

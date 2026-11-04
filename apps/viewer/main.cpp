@@ -9,7 +9,7 @@
 //              + Q / E: turn 90 deg   R: tip 90 deg     release: drop or throw
 //   Create     1-9 drop a block at the cursor (Cube, Brick, Beam, Roof, Cylinder, HalfCyl,
 //              Arch, Cone, Pyramid) · C recolor held/hovered block · O beech/oak
-//   Scene      F2 tower  F3 house  F4 showcase  F5 pile  Delete clear
+//   Scene      F2 tower  F3 house  F4 showcase  F5 pile  F6 grain demo  Delete clear
 //   Edit       Ctrl+Z undo · Ctrl+Y / Ctrl+Shift+Z redo
 //   Other      P pause · M mute · F1 help · Esc quit
 //
@@ -52,6 +52,8 @@ struct Options {
     bool hidden = false;
     bool demoGrab = false;    // scripted pick-and-carry for headless checks
     bool mute = false;
+    float zoom = 0.0f;        // camera distance override (screenshots)
+    float yaw = -100.0f;      // camera yaw override [rad], -100 = keep default
 };
 
 Options parse(int argc, char** argv) {
@@ -65,6 +67,8 @@ Options parse(int argc, char** argv) {
         else if (a == "--hidden") o.hidden = true;
         else if (a == "--demo-grab") o.demoGrab = true;
         else if (a == "--mute") o.mute = true;
+        else if (a == "--zoom") o.zoom = std::stof(next());
+        else if (a == "--yaw") o.yaw = std::stof(next());
         else std::fprintf(stderr, "ignoring unknown argument: %s\n", a.c_str());
     }
     return o;
@@ -143,6 +147,8 @@ public:
         m_audio = std::make_unique<AudioOutput>(m_synth);
     }
 
+    viewer::OrbitCamera& camera() { return m_camera; }
+
     void loadScene(const std::string& name, bool undoable = true) {
         if (undoable) pushUndo();
         release();
@@ -151,6 +157,7 @@ public:
         else if (name == "tower") scenes::buildTower(m_sim, 15, 0.0f, 0.0f, m_species);
         else if (name == "showcase") scenes::buildShowcase(m_sim, {-0.4f, 0.0f, 0.0f}, m_species);
         else if (name == "pile") scenes::dropPile(m_sim, 100, m_seed++, {}, m_species);
+        else if (name == "grain") scenes::buildGrainDemo(m_sim, m_species);
         else if (name != "empty") log::warn("unknown scene '{}'", name);
     }
 
@@ -209,6 +216,7 @@ public:
             else if (k == SDLK_F3) loadScene("house");
             else if (k == SDLK_F4) loadScene("showcase");
             else if (k == SDLK_F5) loadScene("pile");
+            else if (k == SDLK_F6) loadScene("grain");
             else if (k == SDLK_DELETE) { pushUndo(); release(); m_sim.clearBlocks(); }
             else if (k == SDLK_P) m_sim.paused = !m_sim.paused;
             else if (k == SDLK_M) m_muted = !m_muted;
@@ -467,7 +475,7 @@ private:
         if (m_showHelp) {
             text(10.0f, 44.0f, "Left-drag block: carry | Shift+mouse/wheel: lift | Ctrl+mouse: turn | hold Space: align | Q/E/R: 90 deg");
             text(10.0f, 58.0f, "WASD: move | right-drag: orbit | middle/Shift+right-drag: pan | wheel: zoom");
-            text(10.0f, 72.0f, "1-9: new block at cursor | C: recolor | O: beech/oak | F2-F5: scenes | Del: clear");
+            text(10.0f, 72.0f, "1-9: new block at cursor | C: recolor | O: beech/oak | F2-F6: scenes | Del: clear");
             text(10.0f, 86.0f, "Ctrl+Z: undo | Ctrl+Y: redo | P: pause | M: mute | F1: help | Esc: quit");
         }
     }
@@ -525,6 +533,8 @@ int main(int argc, char** argv) {
     {
         App app(renderer, opt.mute);
         app.loadScene(opt.scene, false);
+        if (opt.zoom > 0.0f) app.camera().distance = opt.zoom;
+        if (opt.yaw > -99.0f) app.camera().yaw = opt.yaw;
 
         Uint64 last = SDL_GetTicksNS();
         bool running = true;

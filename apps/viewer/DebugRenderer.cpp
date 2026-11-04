@@ -79,62 +79,10 @@ glm::mat4 modelMatrix(const physics::Transform& t) {
     return m;
 }
 
-/// Splits triangles until no edge is longer than `maxEdge`, so that painter's
-/// sorting by triangle depth works for long faces (beams, arch fronts).
-geometry::RenderMesh tessellate(const geometry::RenderMesh& in, float maxEdge) {
-    geometry::RenderMesh out;
-    struct V {
-        glm::vec3 p;
-        glm::vec3 n;
-    };
-    std::vector<std::array<V, 3>> stack;
-    for (std::size_t i = 0; i + 2 < in.indices.size(); i += 3) {
-        stack.push_back({{{in.positions[in.indices[i]], in.normals[in.indices[i]]},
-                          {in.positions[in.indices[i + 1]], in.normals[in.indices[i + 1]]},
-                          {in.positions[in.indices[i + 2]], in.normals[in.indices[i + 2]]}}});
-        while (!stack.empty()) {
-            const auto t = stack.back();
-            stack.pop_back();
-            std::size_t longest = 0;
-            float best = 0.0f;
-            for (std::size_t e = 0; e < 3; ++e) {
-                const float len = glm::length(t[(e + 1) % 3].p - t[e].p);
-                if (len > best) {
-                    best = len;
-                    longest = e;
-                }
-            }
-            if (best <= maxEdge) {
-                const auto base = static_cast<std::uint32_t>(out.positions.size());
-                for (const auto& v : t) {
-                    out.positions.push_back(v.p);
-                    out.normals.push_back(v.n);
-                }
-                out.indices.insert(out.indices.end(), {base, base + 1, base + 2});
-                continue;
-            }
-            const V& a = t[longest];
-            const V& b = t[(longest + 1) % 3];
-            const V& c = t[(longest + 2) % 3];
-            const V m{(a.p + b.p) * 0.5f, glm::normalize(a.n + b.n)};
-            stack.push_back({a, m, c});
-            stack.push_back({m, b, c});
-        }
-    }
-    return out;
-}
-
 } // namespace
 
-DebugRenderer::DebugRenderer(SDL_Renderer* renderer) : m_renderer(renderer) {}
-
-const geometry::RenderMesh& DebugRenderer::meshFor(blocks::BlockType type) {
-    auto& mesh = m_meshes.at(static_cast<std::size_t>(type));
-    if (mesh.indices.empty()) {
-        mesh = tessellate(blocks::definition(type).renderMesh, 0.008f);
-    }
-    return mesh;
-}
+DebugRenderer::DebugRenderer(SDL_Renderer* renderer)
+    : m_renderer(renderer), m_atlas(std::make_unique<GrainAtlas>(renderer)) {}
 
 DebugRenderer::~DebugRenderer() {
     if (m_scene) SDL_DestroyTexture(m_scene);
@@ -189,19 +137,28 @@ void DebugRenderer::draw(const simulation::Simulation& sim, const OrbitCamera& c
     drawBackdrop(viewProj);
     drawShadows(sim, viewProj);
 
+    m_atlas->prepare(sim);
     m_triangles.clear();
-    collectBlock(m_room.fence, glm::mat4(1.0f), m_room.fenceColorLinear, 1.0f, viewProj, eye, 1.0f);
+    collectBlock(m_room.fence, {}, glm::mat4(1.0f), m_room.fenceColorLinear, 1.0f, viewProj, eye, 1.0f);
     const auto& blockList = sim.blocks();
     for (std::size_t i = 0; i < blockList.size(); ++i) {
         const auto& block = blockList[i];
-        float highlight = blockTint(i);
-        if (overlay.grabbed == i) highlight *= 1.25f;
-        else if (overlay.hovered == i) highlight *= 1.12f;
-        const glm::vec3 albedo = materials::applyStain(speciesColor(block.species), block.stain);
-        collectBlock(meshFor(block.type), modelMatrix(sim.interpolated(i)), albedo, highlight, viewProj,
-                     eye, 1.0f);
+        float highlight = 1.0f;
+        if (overlay.grabbed == i) highlight = 1.22f;
+        else if (overlay.hovered == i) highlight = 1.10f;
+        const auto& layout = m_atlas->layout(block.type);
+        const auto region = m_atlas->region(block);
+        if (region) {
+            // Albedo comes from the baked grain texture; vertices carry lighting.
+            collectBlock(layout.mesh, {&layout.uv, *region}, modelMatrix(sim.interpolated(i)), glm::vec3(1.0f),
+                         highlight, viewProj, eye, 1.0f);
+        } else {
+            const glm::vec3 albedo = materials::applyStain(speciesColor(block.species), block.stain);
+            collectBlock(layout.mesh, {}, modelMatrix(sim.interpolated(i)), albedo, highlight * blockTint(i),
+                         viewProj, eye, 1.0f);
+        }
     }
-    flush(true);
+    flush(true, m_atlas->texture());
 
     if (overlay.ghost) {
         drawGhost(*overlay.ghost, viewProj, eye);
@@ -288,7 +245,7 @@ void DebugRenderer::drawShadows(const simulation::Simulation& sim, const glm::ma
     SDL_RenderTexture(m_renderer, m_shadow, nullptr, nullptr);
 }
 
-void DebugRenderer::collectBlock(const geometry::RenderMesh& mesh, const glm::mat4& model,
+void DebugRenderer::collectBlock(const geometry::RenderMesh& mesh, const Texturing& tex, const glm::mat4& model,
                                  const glm::vec3& baseLinear, float highlight,
                                  const glm::mat4& viewProj, const glm::vec3& eye, float alpha) {
     const glm::mat3 normalMat(model);
@@ -316,6 +273,12 @@ void DebugRenderer::collectBlock(const geometry::RenderMesh& mesh, const glm::ma
             tri.screen[static_cast<std::size_t>(j)] = p->screen;
             tri.color[static_cast<std::size_t>(j)] =
                 shade(baseLinear, n[j], glm::normalize(eye - w[j]), highlight, alpha);
+            if (tex.uv) {
+                const glm::vec2 t = ((*tex.uv)[mesh.indices[k + static_cast<std::size_t>(j)]] + tex.origin) / m_atlas->size();
+                tri.uv[static_cast<std::size_t>(j)] = {t.x, t.y};
+            } else {
+                tri.uv[static_cast<std::size_t>(j)] = m_atlas->whiteUV();
+            }
             depth += p->depth;
         }
         if (!ok) continue;
@@ -327,13 +290,13 @@ void DebugRenderer::collectBlock(const geometry::RenderMesh& mesh, const glm::ma
 void DebugRenderer::drawGhost(const Overlay::Ghost& ghost, const glm::mat4& viewProj,
                               const glm::vec3& eye) {
     m_triangles.clear();
-    collectBlock(meshFor(ghost.type), modelMatrix(ghost.transform),
+    collectBlock(m_atlas->layout(ghost.type).mesh, {}, modelMatrix(ghost.transform),
                  glm::vec3(0.55f, 0.75f, 1.0f), 1.0f, viewProj, eye, 0.28f);
     SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
     flush(true);
 }
 
-void DebugRenderer::flush(bool sort) {
+void DebugRenderer::flush(bool sort, SDL_Texture* texture) {
     if (sort) {
         // Painter's algorithm: far to near.
         std::sort(m_triangles.begin(), m_triangles.end(),
@@ -343,11 +306,11 @@ void DebugRenderer::flush(bool sort) {
     m_vertices.reserve(m_triangles.size() * 3);
     for (const auto& tri : m_triangles) {
         for (std::size_t j = 0; j < 3; ++j) {
-            m_vertices.push_back(SDL_Vertex{tri.screen[j], tri.color[j], SDL_FPoint{0.0f, 0.0f}});
+            m_vertices.push_back(SDL_Vertex{tri.screen[j], tri.color[j], texture ? tri.uv[j] : SDL_FPoint{0.0f, 0.0f}});
         }
     }
     if (!m_vertices.empty()) {
-        SDL_RenderGeometry(m_renderer, nullptr, m_vertices.data(), static_cast<int>(m_vertices.size()),
+        SDL_RenderGeometry(m_renderer, texture, m_vertices.data(), static_cast<int>(m_vertices.size()),
                            nullptr, 0);
     }
 }

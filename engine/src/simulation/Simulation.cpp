@@ -78,12 +78,14 @@ void Simulation::addPlayArea(const PlayArea& area) {
 }
 
 std::size_t Simulation::addBlock(blocks::BlockType type, materials::WoodSpecies species,
-                                 const physics::Transform& transform, materials::Stain stain) {
+                                 const physics::Transform& transform, materials::Stain stain,
+                                 std::optional<wood::WoodCut> cut) {
     BlockInstance instance;
     instance.body = m_world.addBlock(type, species, transform);
     instance.type = type;
     instance.species = species;
     instance.stain = stain;
+    instance.cut = cut ? *cut : m_wood.cut(type, species);
     instance.previous = transform;
     instance.current = transform;
     m_blocks.push_back(instance);
@@ -107,7 +109,7 @@ void Simulation::clearBlocks() {
 SceneSnapshot Simulation::snapshot() const {
     SceneSnapshot s;
     for (const auto& b : m_blocks) {
-        s.blocks.push_back({b.type, b.species, b.stain, m_world.transform(b.body)});
+        s.blocks.push_back({b.type, b.species, b.stain, b.cut, m_world.transform(b.body)});
     }
     return s;
 }
@@ -115,7 +117,7 @@ SceneSnapshot Simulation::snapshot() const {
 void Simulation::restore(const SceneSnapshot& snapshot) {
     clearBlocks();
     for (const auto& b : snapshot.blocks) {
-        addBlock(b.type, b.species, b.transform, b.stain);
+        addBlock(b.type, b.species, b.transform, b.stain, b.cut);
     }
     m_world.optimizeBroadPhase();
 }
