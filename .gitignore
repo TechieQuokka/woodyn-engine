@@ -1,0 +1,17 @@
+# Build output
+/build/
+/out/
+
+# Local tools / caches
+/.tools/
+/.cache/
+compile_commands.json
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Viewer screenshots
+*.bmp
