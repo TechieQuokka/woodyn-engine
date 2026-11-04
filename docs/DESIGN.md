@@ -557,10 +557,18 @@ Measured: a cube dropped at 25° onto the mat hit with a corner, flipped onto a 
 | D-46 | Surface rolling resistance | Rolling resistance uses max(c_rr of the block, c_rr of the touched surface): foam mat 0.08, wood 0.006 (PROVISIONAL). Measured alone it barely reduced the rocking (19° → 13–15°) while strongly limiting rolling at higher values, so it stays moderate. | 2026-11-04 |
 | D-47 | Soft-impact absorption | Contacts with a **soft** surface (the foam mat) approaching faster than 0.15 m/s mark the block; after that step it keeps 50 % of its spin. Slow contacts (resting, gravity tipping, rolling) are untouched. Result: worst rebound 14.9° → 2.2°, at rest 35 ms after landing flat, tip-over onto the face within ~50 ms, rolling distance unchanged. Tried and rejected: restitution 0 (no effect: rebound 16.4°) and reduced inverse inertia on soft contacts (rebound 44.9°: the floor then cannot stop the spin). Regression tests: `SoftLanding.*`. | 2026-11-04 |
 
-### Known Issues / Open Items (after Phase 4, stage 1)
+### Phase 4 Stage 2 — Photo Micro Detail
 
-- **Photo micro-detail (D-39 stage 2):** CC0 wood photo textures still to be sourced and blended in (pores, fine fibers, roughness detail).
-- **Side grain reads slightly regular** at grazing angles (procedural rings/streaks); stage 2 should break it up.
+| ID   | Topic               | Decision | Date |
+| ---- | ------------------- | -------- | ---- |
+| D-48 | Photo source | ambientCG **Wood058** (CC0, 40 × 40 cm sample): uniform fine fibers and pores without macro figure. Rejected: Wood048 (strong flat-sawn figure that would fight the procedural rings), Wood054 (scratches), Wood056 (too smooth). Provenance in `assets/wood/SOURCES.md`; reproducible with `tools/make_fiber_detail.py`. | 2026-11-04 |
+| D-49 | Packed detail texture | 1024² RGBA PNG: R = high-passed luminance ratio (features > ~5 mm removed, so the photo adds no tone or rings), G/B = normal x/y, A = roughness detail. Loaded with stb_image (pinned commit, SHA-256), mipmapped, 8× anisotropic, repeat. | 2026-11-04 |
+| D-50 | Applying the detail | GPU only (not part of the CPU `surfaceAlbedo` reference): projected in **log space** onto two planes containing the fiber axis, blended by the normal, so fibers always run along the real grain and stay continuous across blocks cut from the same log; per-log offset hides repetition; one tile = 20 cm of wood; strength 0.7 on side grain, none on end grain. Modulates albedo, normal and roughness. F10 toggles it. Completes D-39. | 2026-11-04 |
+
+### Known Issues / Open Items (after Phase 4)
+
+- **End grain has no photo detail** (no suitable CC0 end-grain photo; procedural only).
+- **Oak uses the same fiber photo as beech** (fine for micro detail; a ring-porous photo would be better).
 - **No GPU frustum culling / LOD yet:** fine for the 1,000-block target on the RTX 3060, revisit in Phase 5.
 - **Sound calibration:** mode tables are perceptual estimates; no sliding/rolling sounds yet.
 - **Very tall towers:** 20-cube towers need ≥ 600 Hz (D-11).

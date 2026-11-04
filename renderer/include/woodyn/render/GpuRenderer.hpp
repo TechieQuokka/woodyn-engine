@@ -80,6 +80,10 @@ struct Settings {
     float dofCocScale = 9.0f;  // [px] blur per unit relative defocus ("tilt-shift" strength)
     float dofMaxCoc = 6.0f;    // [px]
     float vignette = 0.18f;
+    /// CC0 photo micro detail on side grain (D-39 stage 2).
+    bool photoDetail = true;
+    float photoDetailStrength = 0.7f;
+    float photoDetailRepeat = 0.2f; // [m] one texture tile covers 20 cm of wood
 };
 
 /// Real-time PBR renderer on the SDL3 GPU API (Vulkan on Linux) — D-37..D-41.

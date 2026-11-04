@@ -60,6 +60,8 @@ struct Options {
     bool demoGrab = false;    // scripted pick-and-carry for headless checks
     bool mute = false;
     std::string renderer = "gpu"; // gpu (Vulkan PBR) or soft (debug software renderer)
+    bool noPhotoDetail = false;   // compare procedural-only grain
+    bool clean = false;           // no HUD and no shelf (screenshots)
     float zoom = 0.0f;        // camera distance override (screenshots)
     float yaw = -100.0f;      // camera yaw override [rad], -100 = keep default
 };
@@ -76,6 +78,8 @@ Options parse(int argc, char** argv) {
         else if (a == "--demo-grab") o.demoGrab = true;
         else if (a == "--mute") o.mute = true;
         else if (a == "--renderer") o.renderer = next();
+        else if (a == "--no-photo-detail") o.noPhotoDetail = true;
+        else if (a == "--clean") o.clean = true;
         else if (a == "--zoom") o.zoom = std::stof(next());
         else if (a == "--yaw") o.yaw = std::stof(next());
         else std::fprintf(stderr, "ignoring unknown argument: %s\n", a.c_str());
@@ -169,6 +173,13 @@ public:
     }
 
     viewer::OrbitCamera& camera() { return m_camera; }
+    void setClean() {
+        m_clean = true;
+        m_shelf.visible = false;
+    }
+    void setPhotoDetail(bool on) {
+        if (m_gpuView) m_gpuView->settings.photoDetail = on;
+    }
 
     void loadScene(const std::string& name, bool undoable = true) {
         if (undoable) pushUndo();
@@ -257,6 +268,7 @@ public:
                 m_gpuView->settings.contactShadows = m_gpuView->settings.ssao;
             }
             else if (k == SDLK_F9 && m_gpuView) m_gpuView->settings.bloom = !m_gpuView->settings.bloom;
+            else if (k == SDLK_F10 && m_gpuView) m_gpuView->settings.photoDetail = !m_gpuView->settings.photoDetail;
             else if (k == SDLK_DELETE) { pushUndo(); release(); m_sim.clearBlocks(); }
             else if (k == SDLK_P) m_sim.paused = !m_sim.paused;
             else if (k == SDLK_M) m_muted = !m_muted;
@@ -299,7 +311,7 @@ public:
         SDL_GetCurrentRenderOutputSize(m_renderer, &w, &h);
         m_shelf.layout(w, h);
         m_shelf.draw(m_renderer, m_nextStain, m_species, m_mouse.x, m_mouse.y);
-        drawHud();
+        if (!m_clean) drawHud();
     }
 
     /// Scripted pick-and-carry used for headless verification (--demo-grab).
@@ -600,8 +612,8 @@ private:
         }
         if (m_gpuView) {
             const auto& st = m_gpuView->settings;
-            std::snprintf(line, sizeof(line), "Vulkan PBR | F7 depth of field: %s | F8 AO+contact: %s | F9 bloom: %s",
-                          st.dof ? "on" : "off", st.ssao ? "on" : "off", st.bloom ? "on" : "off");
+            std::snprintf(line, sizeof(line), "Vulkan PBR | F7 depth of field: %s | F8 AO+contact: %s | F9 bloom: %s | F10 photo detail: %s",
+                          st.dof ? "on" : "off", st.ssao ? "on" : "off", st.bloom ? "on" : "off", st.photoDetail ? "on" : "off");
         } else {
             std::snprintf(line, sizeof(line), "software renderer (debug)");
         }
@@ -621,6 +633,7 @@ private:
     SDL_Window* m_window = nullptr;
     viewer::Shelf m_shelf;
     double m_clock = 0.0;
+    bool m_clean = false;
     std::array<double, 4> m_keyPressTime{}; // Q, E, R, F
     SDL_Renderer* m_renderer;
     audio::ImpactSynth m_synth;
@@ -697,6 +710,8 @@ int main(int argc, char** argv) {
         app.loadScene(opt.scene, false);
         if (opt.zoom > 0.0f) app.camera().distance = opt.zoom;
         if (opt.yaw > -99.0f) app.camera().yaw = opt.yaw;
+        if (opt.noPhotoDetail) app.setPhotoDetail(false);
+        if (opt.clean) app.setClean();
 
         Uint64 last = SDL_GetTicksNS();
         bool running = true;

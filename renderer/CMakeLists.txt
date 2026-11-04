@@ -36,11 +36,16 @@ foreach(src ${WOODYN_SHADER_SOURCES})
 endforeach()
 add_custom_target(woodyn_shaders DEPENDS ${spirv_outputs})
 
+# stb_image implementation, compiled without WOODYN's warning flags.
+add_library(woodyn_stb_image STATIC src/StbImage.cpp)
+target_link_libraries(woodyn_stb_image PUBLIC stb_headers)
+
 add_library(woodyn_renderer STATIC
     src/GpuUtil.cpp
     src/Environment.cpp
     src/GpuRenderer.cpp
     src/GrainProbe.cpp
+    src/ImageLoader.cpp
 )
 add_library(woodyn::renderer ALIAS woodyn_renderer)
 add_dependencies(woodyn_renderer woodyn_shaders)
@@ -48,6 +53,8 @@ add_dependencies(woodyn_renderer woodyn_shaders)
 target_include_directories(woodyn_renderer
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(woodyn_renderer PUBLIC woodyn::engine SDL3::SDL3)
-target_compile_definitions(woodyn_renderer PUBLIC WOODYN_SHADER_DIR="${WOODYN_SHADER_OUT}")
+target_link_libraries(woodyn_renderer PUBLIC woodyn::engine SDL3::SDL3 PRIVATE woodyn_stb_image)
+target_compile_definitions(woodyn_renderer PUBLIC
+    WOODYN_SHADER_DIR="${WOODYN_SHADER_OUT}"
+    WOODYN_ASSET_DIR="${CMAKE_SOURCE_DIR}/assets")
 woodyn_set_warnings(woodyn_renderer)

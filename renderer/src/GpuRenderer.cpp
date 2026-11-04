@@ -2,6 +2,7 @@
 
 #include "Environment.hpp"
 #include "GpuUtil.hpp"
+#include "ImageLoader.hpp"
 
 #include "woodyn/core/Log.hpp"
 
@@ -53,6 +54,7 @@ struct FrameUniforms {
     glm::vec4 sh[9];
     glm::vec4 viewport;
     glm::vec4 params;
+    glm::vec4 detail;
 };
 
 struct SsaoUniforms {
@@ -132,6 +134,8 @@ struct GpuRenderer::Impl {
     SDL_GPUSampler* pointClamp = nullptr;
     SDL_GPUSampler* shadowSampler = nullptr;
     SDL_GPUSampler* envSampler = nullptr;
+    SDL_GPUSampler* detailSampler = nullptr;
+    SDL_GPUTexture* fiberDetail = nullptr; // packed photo micro detail (RGBA8, mips)
 
     // Geometry
     std::vector<Vertex> vertices;
@@ -214,7 +218,7 @@ struct GpuRenderer::Impl {
         const ShaderResources vsInst{0, 0, 1, 1};
         const ShaderResources vsRoom{0, 0, 0, 1};
         SDL_GPUShader* woodVs = shader("wood.vert", SDL_GPU_SHADERSTAGE_VERTEX, vsInst);
-        SDL_GPUShader* woodFs = shader("wood.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, {3, 0, 2, 1});
+        SDL_GPUShader* woodFs = shader("wood.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, {4, 0, 2, 1});
         SDL_GPUShader* roomVs = shader("room.vert", SDL_GPU_SHADERSTAGE_VERTEX, vsRoom);
         SDL_GPUShader* roomFs = shader("room.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, {3, 0, 0, 1});
         SDL_GPUShader* ghostFs = shader("ghost.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, {0, 0, 0, 1});
@@ -293,7 +297,56 @@ struct GpuRenderer::Impl {
 
         shadowMap = detail::createTexture(device, kDepth, kShadowSize, kShadowSize,
                                           SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-        return linearClamp && pointClamp && shadowSampler && envSampler && shadowMap;
+
+        SDL_GPUSamplerCreateInfo ds{};
+        ds.min_filter = ds.mag_filter = SDL_GPU_FILTER_LINEAR;
+        ds.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
+        ds.address_mode_u = ds.address_mode_v = ds.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+        ds.enable_anisotropy = true;
+        ds.max_anisotropy = 8.0f;
+        ds.max_lod = 16.0f;
+        detailSampler = SDL_CreateGPUSampler(device, &ds);
+        loadFiberDetail();
+        return linearClamp && pointClamp && shadowSampler && envSampler && shadowMap && detailSampler && fiberDetail;
+    }
+
+    /// Loads assets/wood/fiber_detail.png (falls back to a neutral texel).
+    void loadFiberDetail() {
+        detail::Image img = detail::loadPng(std::string(WOODYN_ASSET_DIR) + "/wood/fiber_detail.png");
+        if (img.rgba.empty()) {
+            img.width = img.height = 1;
+            img.rgba = {128, 128, 128, 128}; // ratio 1, flat normal, roughness ratio 1
+        } else {
+            log::info("photo micro detail: {}x{} (ambientCG Wood058, CC0)", img.width, img.height);
+        }
+        const auto w = static_cast<std::uint32_t>(img.width);
+        const auto h = static_cast<std::uint32_t>(img.height);
+        std::uint32_t levels = 1;
+        while ((std::max(w, h) >> levels) > 0) ++levels;
+        fiberDetail = detail::createTexture(device, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, w, h,
+                                            SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+                                            SDL_GPU_SAMPLECOUNT_1, levels);
+        if (!fiberDetail) return;
+        SDL_GPUTransferBufferCreateInfo t{};
+        t.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        t.size = static_cast<Uint32>(img.rgba.size());
+        SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &t);
+        std::memcpy(SDL_MapGPUTransferBuffer(device, tb, false), img.rgba.data(), img.rgba.size());
+        SDL_UnmapGPUTransferBuffer(device, tb);
+        SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+        SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
+        SDL_GPUTextureTransferInfo src{};
+        src.transfer_buffer = tb;
+        SDL_GPUTextureRegion dst{};
+        dst.texture = fiberDetail;
+        dst.w = w;
+        dst.h = h;
+        dst.d = 1;
+        SDL_UploadToGPUTexture(copy, &src, &dst, false);
+        SDL_EndGPUCopyPass(copy);
+        if (levels > 1) SDL_GenerateMipmapsForGPUTexture(cmd, fiberDetail);
+        SDL_SubmitGPUCommandBuffer(cmd);
+        SDL_ReleaseGPUTransferBuffer(device, tb);
     }
 
     void releaseTargets() {
@@ -437,7 +490,8 @@ GpuRenderer::~GpuRenderer() {
                     m.blurPipe, m.dofPipe, m.bloomDownPipe, m.bloomUpPipe, m.tonemapPipe}) {
         if (p) SDL_ReleaseGPUGraphicsPipeline(m.device, p);
     }
-    for (auto* s : {m.linearClamp, m.pointClamp, m.shadowSampler, m.envSampler}) {
+    if (m.fiberDetail) SDL_ReleaseGPUTexture(m.device, m.fiberDetail);
+    for (auto* s : {m.linearClamp, m.pointClamp, m.shadowSampler, m.envSampler, m.detailSampler}) {
         if (s) SDL_ReleaseGPUSampler(m.device, s);
     }
     for (auto* b : {m.vertexBuffer, m.indexBuffer, m.roomBuffer, m.woodBuffer, m.instanceBuffer}) {
@@ -610,6 +664,7 @@ SDL_GPUTexture* GpuRenderer::render(int width, int height, const Camera& camera,
         f.viewport = {fw, fh, 1.0f / fw, 1.0f / fh};
         f.params = {settings.ssao ? 1.0f : 0.0f, settings.contactShadows ? 1.0f : 0.0f,
                     static_cast<float>(m.env.mipLevels - 1), 2.0f * hs / static_cast<float>(kShadowSize)};
+        f.detail = {settings.photoDetail ? settings.photoDetailStrength : 0.0f, settings.photoDetailRepeat, 0.0f, 0.0f};
 
         SDL_GPUColorTargetInfo ct{};
         ct.texture = m.msaaColor;
@@ -635,7 +690,9 @@ SDL_GPUTexture* GpuRenderer::render(int width, int height, const Camera& camera,
         m.drawRoom(pass);
 
         SDL_BindGPUGraphicsPipeline(pass, m.woodPipe);
-        SDL_BindGPUFragmentSamplers(pass, 0, lighting.data(), 3);
+        const std::array woodSamplers{lighting[0], lighting[1], lighting[2],
+                                      SDL_GPUTextureSamplerBinding{m.fiberDetail, m.detailSampler}};
+        SDL_BindGPUFragmentSamplers(pass, 0, woodSamplers.data(), 4);
         SDL_BindGPUVertexStorageBuffers(pass, 0, &m.instanceBuffer, 1);
         SDL_GPUBuffer* fragBuffers[2] = {m.instanceBuffer, m.woodBuffer};
         SDL_BindGPUFragmentStorageBuffers(pass, 0, fragBuffers, 2);

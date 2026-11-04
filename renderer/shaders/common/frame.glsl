@@ -9,5 +9,6 @@ layout(std140, set = 3, binding = 0) uniform Frame {
     vec4 sh[9];     // irradiance SH (pre-convolved)
     vec4 viewport;  // w, h, 1/w, 1/h
     vec4 params;    // x: AO on, y: contact shadows on, z: env max mip, w: shadow texel size
+    vec4 detail;    // x: photo micro-detail strength (0 = off), y: texture repeat [m]
 } frame;
 #endif

@@ -41,6 +41,17 @@ FetchContent_Declare(JoltPhysics
 
 FetchContent_MakeAvailable(glm spdlog JoltPhysics)
 
+# --- stb_image (PNG loading for texture assets) -----------------------------------
+# Header-only; pinned to a commit at least two weeks old, SHA-256 verified.
+if(WOODYN_BUILD_VIEWER)
+    FetchContent_Declare(stb
+        URL      https://github.com/nothings/stb/archive/a7d4c2175630e1ea5b6f8dd00ab96fed0b97b96d.tar.gz
+        URL_HASH SHA256=ae498e10fadeba0c2e7aa86c71cc9989c4d895201cd26b8b72061c76cfde4edf)
+    FetchContent_MakeAvailable(stb)
+    add_library(stb_headers INTERFACE)
+    target_include_directories(stb_headers SYSTEM INTERFACE ${stb_SOURCE_DIR})
+endif()
+
 # --- SDL3 (window, input) ------------------------------------------------------
 if(WOODYN_BUILD_VIEWER)
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
