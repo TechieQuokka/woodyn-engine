@@ -185,4 +185,53 @@ std::vector<std::size_t> dropPile(Simulation& sim, int count, std::uint32_t seed
     return out;
 }
 
+std::vector<std::vector<std::size_t>> buildTowerField(Simulation& sim, int count, int towerHeight,
+                                                      float spacing) {
+    std::vector<std::vector<std::size_t>> towers;
+    if (count <= 0 || towerHeight <= 0) return towers;
+    const int towerCount = (count + towerHeight - 1) / towerHeight;
+    const int perRow = static_cast<int>(std::ceil(std::sqrt(static_cast<float>(towerCount))));
+    if (const auto& area = sim.playArea(); area && perRow > 1) {
+        // Keep the field on the mat (5 cm margin); never closer than 1.5 modules.
+        const float fit = (2.0f * (area->halfSize - 0.05f)) / static_cast<float>(perRow - 1);
+        spacing = std::max(std::min(spacing, fit), 1.5f * u);
+    }
+    const float offset = 0.5f * static_cast<float>(perRow - 1) * spacing;
+    int remaining = count;
+    for (int t = 0; t < towerCount; ++t) {
+        const float x = static_cast<float>(t % perRow) * spacing - offset;
+        const float z = static_cast<float>(t / perRow) * spacing - offset;
+        const int height = std::min(towerHeight, remaining);
+        remaining -= height;
+        towers.push_back(buildTower(sim, height, x, z));
+        // Rotate the palette per tower so neighbours differ in color.
+        for (std::size_t k = 0; k < towers.back().size(); ++k) {
+            sim.setStain(towers.back()[k], kPalette[(k + static_cast<std::size_t>(t)) % kPalette.size()]);
+        }
+    }
+    sim.world().optimizeBroadPhase();
+    return towers;
+}
+
+int knockTowers(Simulation& sim, const std::vector<std::vector<std::size_t>>& towers, float fraction,
+                float speed) {
+    const int n = std::clamp(static_cast<int>(std::ceil(fraction * static_cast<float>(towers.size()))), 0,
+                             static_cast<int>(towers.size()));
+    for (int t = 0; t < n; ++t) {
+        const auto& tower = towers[static_cast<std::size_t>(t)];
+        if (tower.empty()) continue;
+        // Tip the whole tower about its base (rigid rotation around -Z), so the
+        // top moves at `speed`: v = omega x r for every cube.
+        const glm::vec3 base = sim.blocks()[tower.front()].current.position - glm::vec3(0.0f, 0.5f * u, 0.0f);
+        const float height = sim.blocks()[tower.back()].current.position.y - base.y;
+        const glm::vec3 omega{0.0f, 0.0f, -speed / std::max(height, u)};
+        for (const auto i : tower) {
+            const auto body = sim.blocks()[i].body;
+            sim.world().setLinearVelocity(body, glm::cross(omega, sim.blocks()[i].current.position - base));
+            sim.world().setAngularVelocity(body, omega);
+        }
+    }
+    return n;
+}
+
 } // namespace woodyn::simulation::scenes

@@ -120,6 +120,7 @@ struct GpuRenderer::Impl {
     SDL_GPUGraphicsPipeline* roomPipe = nullptr;
     SDL_GPUGraphicsPipeline* ghostPipe = nullptr;
     SDL_GPUGraphicsPipeline* prepassWood = nullptr;
+    SDL_GPUGraphicsPipeline* depthOnlyWood = nullptr; // MSAA depth prepass of the main pass (D-57)
     SDL_GPUGraphicsPipeline* prepassRoom = nullptr;
     SDL_GPUGraphicsPipeline* shadowPipe = nullptr;
     SDL_GPUGraphicsPipeline* ssaoPipe = nullptr;
@@ -186,14 +187,15 @@ struct GpuRenderer::Impl {
 
     SDL_GPUGraphicsPipeline* makePipeline(SDL_GPUShader* vs, SDL_GPUShader* fs, const SDL_GPUVertexInputState& input,
                                           std::span<const SDL_GPUColorTargetDescription> targets, bool depth,
-                                          bool depthWrite, SDL_GPUSampleCount samples, bool depthBias = false) {
+                                          bool depthWrite, SDL_GPUSampleCount samples, bool depthBias = false,
+                                          SDL_GPUCullMode cull = SDL_GPU_CULLMODE_NONE) {
         SDL_GPUGraphicsPipelineCreateInfo info{};
         info.vertex_shader = vs;
         info.fragment_shader = fs;
         info.vertex_input_state = input;
         info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
         info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-        info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+        info.rasterizer_state.cull_mode = cull;
         info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
         info.rasterizer_state.enable_depth_clip = true;
         if (depthBias) {
@@ -260,10 +262,21 @@ struct GpuRenderer::Impl {
         const std::array ldrTarget{colorTarget(kLdr)};
         const std::span<const SDL_GPUColorTargetDescription> none;
 
-        woodPipe = makePipeline(woodVs, woodFs, meshInput, hdrTarget, true, true, kMsaa);
+        // Block meshes are closed and wound counter-clockwise seen from outside
+        // (RenderMeshTest.NormalsAreUnitAndAgreeWithWinding): back faces are never visible (D-56).
+        constexpr auto kBack = SDL_GPU_CULLMODE_BACK;
+        // Main pass: a depth-only pass first, then the expensive wood shader runs
+        // once per visible pixel (LESS_OR_EQUAL, no depth write) instead of
+        // once per overlapping surface (D-57).
+        woodPipe = makePipeline(woodVs, woodFs, meshInput, hdrTarget, true, false, kMsaa, false, kBack);
+        std::array depthOnlyTarget{colorTarget(kHdr)};
+        depthOnlyTarget[0].blend_state.enable_color_write_mask = true;
+        depthOnlyTarget[0].blend_state.color_write_mask = 0;
+        depthOnlyWood = makePipeline(woodVs, shadowFs, meshInput, depthOnlyTarget, true, true, kMsaa, false, kBack);
         roomPipe = makePipeline(roomVs, roomFs, roomInput, hdrTarget, true, true, kMsaa);
+        // The translucent ghost keeps its back faces: they make it read as a solid volume.
         ghostPipe = makePipeline(woodVs, ghostFs, meshInput, ghostTarget, true, false, kMsaa);
-        prepassWood = makePipeline(woodVs, preFs, meshInput, hdrTarget, true, true, SDL_GPU_SAMPLECOUNT_1);
+        prepassWood = makePipeline(woodVs, preFs, meshInput, hdrTarget, true, true, SDL_GPU_SAMPLECOUNT_1, false, kBack);
         prepassRoom = makePipeline(roomVs, preFs, roomInput, hdrTarget, true, true, SDL_GPU_SAMPLECOUNT_1);
         shadowPipe = makePipeline(shadowVs, shadowFs, meshInput, none, true, true, SDL_GPU_SAMPLECOUNT_1, true);
         ssaoPipe = makePipeline(fullVs, ssaoFs, noInput, hdrTarget, false, false, SDL_GPU_SAMPLECOUNT_1);
@@ -274,7 +287,7 @@ struct GpuRenderer::Impl {
         tonemapPipe = makePipeline(fullVs, toneFs, noInput, ldrTarget, false, false, SDL_GPU_SAMPLECOUNT_1);
         for (auto* s : all) SDL_ReleaseGPUShader(device, s);
 
-        const std::array pipes{woodPipe, roomPipe, ghostPipe, prepassWood, prepassRoom, shadowPipe,
+        const std::array pipes{woodPipe, depthOnlyWood, roomPipe, ghostPipe, prepassWood, prepassRoom, shadowPipe,
                                ssaoPipe, blurPipe, dofPipe, bloomDownPipe, bloomUpPipe, tonemapPipe};
         if (std::any_of(pipes.begin(), pipes.end(), [](auto* p) { return p == nullptr; })) return false;
 
@@ -486,7 +499,7 @@ GpuRenderer::~GpuRenderer() {
     auto& m = *m_impl;
     SDL_WaitForGPUIdle(m.device);
     m.releaseTargets();
-    for (auto* p : {m.woodPipe, m.roomPipe, m.ghostPipe, m.prepassWood, m.prepassRoom, m.shadowPipe, m.ssaoPipe,
+    for (auto* p : {m.woodPipe, m.depthOnlyWood, m.roomPipe, m.ghostPipe, m.prepassWood, m.prepassRoom, m.shadowPipe, m.ssaoPipe,
                     m.blurPipe, m.dofPipe, m.bloomDownPipe, m.bloomUpPipe, m.tonemapPipe}) {
         if (p) SDL_ReleaseGPUGraphicsPipeline(m.device, p);
     }
@@ -684,6 +697,12 @@ SDL_GPUTexture* GpuRenderer::render(int width, int height, const Camera& camera,
         const std::array lighting{SDL_GPUTextureSamplerBinding{m.shadowMap, m.shadowSampler},
                                   SDL_GPUTextureSamplerBinding{m.env.cube, m.envSampler},
                                   SDL_GPUTextureSamplerBinding{m.aoBlur, m.linearClamp}};
+
+        // Depth of all blocks first: the room and the wood shader then only
+        // shade what is visible.
+        SDL_BindGPUGraphicsPipeline(pass, m.depthOnlyWood);
+        SDL_BindGPUVertexStorageBuffers(pass, 0, &m.instanceBuffer, 1);
+        m.drawBatches(pass, batches);
 
         SDL_BindGPUGraphicsPipeline(pass, m.roomPipe);
         SDL_BindGPUFragmentSamplers(pass, 0, lighting.data(), 3);

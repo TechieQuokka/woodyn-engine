@@ -35,4 +35,19 @@ std::vector<std::size_t> dropPile(Simulation& sim, int count, std::uint32_t seed
                                   const glm::vec3& center = {0.0f, 0.0f, 0.0f},
                                   materials::WoodSpecies species = materials::WoodSpecies::Beech);
 
+/// Performance scene (Phase 5, D-10): a square grid of cube towers standing
+/// on the play mat. `count` blocks are split into towers of `towerHeight`
+/// cubes (the last tower may be shorter), `spacing` apart (reduced so the
+/// field fits on the play mat, if there is one). Returns the block
+/// indices of every tower, bottom to top, in row-major order.
+std::vector<std::vector<std::size_t>> buildTowerField(Simulation& sim, int count, int towerHeight = 10,
+                                                      float spacing = 0.1f);
+
+/// Tips the first `fraction` of the towers (row-major) over towards +X, like a
+/// child pushing them: each tower starts rotating rigidly about its base so its
+/// top moves at `speed` [m/s]. Returns how many towers
+/// were pushed.
+int knockTowers(Simulation& sim, const std::vector<std::vector<std::size_t>>& towers, float fraction,
+                float speed = 0.6f);
+
 } // namespace woodyn::simulation::scenes

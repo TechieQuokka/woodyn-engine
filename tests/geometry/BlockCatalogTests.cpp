@@ -121,6 +121,8 @@ TEST_P(RenderMeshTest, FitsTheBoundingBox) {
     }
 }
 
+// The GPU renderer culls back faces (D-56): every triangle must be wound
+// counter-clockwise seen from outside, or it would vanish on screen.
 TEST_P(RenderMeshTest, NormalsAreUnitAndAgreeWithWinding) {
     const auto& m = blocks::definition(GetParam()).renderMesh;
     ASSERT_EQ(m.positions.size(), m.normals.size());

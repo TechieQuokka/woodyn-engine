@@ -27,7 +27,14 @@ struct BlockInstance {
 /// Statistics of the last `advance` call.
 struct StepStats {
     int steps = 0;
+    int droppedSteps = 0;             // steps skipped because the physics budget ran out
     double physicsMilliseconds = 0.0; // wall time spent inside physics steps
+};
+
+/// Wall-time split of the last fixed step (profiling, Phase 5).
+struct StepProfile {
+    double physicsMilliseconds = 0.0;     // PhysicsWorld::step (Jolt + grab + rolling resistance)
+    double bookkeepingMilliseconds = 0.0; // bounds, transform capture, impact routing
 };
 
 /// Enclosed play area (D-28): a foam play mat surrounded by a low wooden fence,
@@ -109,6 +116,8 @@ public:
     /// Runs exactly one fixed step (used by tests and headless tools).
     void stepOnce();
 
+    [[nodiscard]] const StepProfile& lastStepProfile() const noexcept { return m_lastProfile; }
+
     /// Transform interpolated between the last two fixed steps (for rendering).
     [[nodiscard]] physics::Transform interpolated(std::size_t index) const;
 
@@ -124,6 +133,10 @@ public:
     [[nodiscard]] std::uint32_t boundsCorrections() const noexcept { return m_boundsCorrections; }
 
     bool paused = false;
+    /// Wall-time budget for the physics of one advance() call [ms]; 0 = none.
+    /// When it runs out, the frame's remaining steps are dropped (slow motion)
+    /// so the frame rate holds (D-59). At least one step always runs.
+    double physicsBudgetMilliseconds = 0.0;
 
 private:
     void captureTransforms();
@@ -142,6 +155,7 @@ private:
     std::vector<SoundImpact> m_impacts;
     std::optional<PlayArea> m_playArea;
     double m_simulatedSeconds = 0.0;
+    StepProfile m_lastProfile;
     std::uint32_t m_boundsCorrections = 0;
 };
 

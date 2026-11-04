@@ -90,8 +90,9 @@ struct Settings {
 /// Real-time PBR renderer on the SDL3 GPU API (Vulkan on Linux) — D-37..D-41.
 ///
 /// Passes per frame: sun shadow map → depth/normal prepass → SSAO + contact
-/// shadows (+ blur) → MSAA 4x HDR forward pass (procedural wood grain, clear
-/// coat, IBL) → depth of field → bloom → Khronos PBR Neutral tone mapping.
+/// shadows (+ blur) → MSAA 4x HDR forward pass (depth-only block pass first,
+/// then procedural wood grain, clear coat, IBL; back faces culled, D-56/D-57)
+/// → depth of field → bloom → Khronos PBR Neutral tone mapping.
 class GpuRenderer {
 public:
     explicit GpuRenderer(SDL_GPUDevice* device, std::string shaderDir = WOODYN_SHADER_DIR);

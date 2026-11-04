@@ -144,22 +144,37 @@ StepStats Simulation::advance(float frameSeconds) {
     if (paused) {
         return stats;
     }
-    stats.steps = m_timestep.accumulate(frameSeconds);
+    const int due = m_timestep.accumulate(frameSeconds);
     const auto start = std::chrono::steady_clock::now();
-    for (int i = 0; i < stats.steps; ++i) {
+    auto elapsedMs = [&] {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    };
+    for (int i = 0; i < due; ++i) {
+        // Over budget: drop the remaining steps of this frame. The simulation
+        // briefly runs in slow motion instead of stalling the frame (D-59).
+        if (i > 0 && physicsBudgetMilliseconds > 0.0 && elapsedMs() > physicsBudgetMilliseconds) {
+            stats.droppedSteps = due - i;
+            break;
+        }
         stepOnce();
+        ++stats.steps;
     }
-    const auto end = std::chrono::steady_clock::now();
-    stats.physicsMilliseconds = std::chrono::duration<double, std::milli>(end - start).count();
+    stats.physicsMilliseconds = elapsedMs();
     return stats;
 }
 
 void Simulation::stepOnce() {
+    using Clock = std::chrono::steady_clock;
+    const auto t0 = Clock::now();
     m_world.step();
+    const auto t1 = Clock::now();
     m_simulatedSeconds += static_cast<double>(m_world.stepSeconds());
     enforceBounds();
     captureTransforms();
     collectImpacts();
+    const auto t2 = Clock::now();
+    m_lastProfile.physicsMilliseconds = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    m_lastProfile.bookkeepingMilliseconds = std::chrono::duration<double, std::milli>(t2 - t1).count();
 }
 
 void Simulation::enforceBounds() {

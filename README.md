@@ -68,7 +68,7 @@ git clone https://github.com/TechieQuokka/woodyn-engine.git
 cd woodyn-engine
 cmake --preset clang-release        # or clang-debug / gcc-debug
 cmake --build --preset clang-release
-ctest --preset clang-release        # 144 tests (GPU tests skip without Vulkan)
+ctest --preset clang-release        # 149 tests (GPU tests skip without Vulkan)
 ```
 
 The presets expect `clang++-23` in `/usr/bin` and `ninja` in `/usr/local/bin`;
@@ -78,7 +78,7 @@ adjust `CMakePresets.json` for other locations.
 
 ```bash
 ./build/clang-release/apps/viewer/woodyn_viewer                    # playroom with a toy house
-./build/clang-release/apps/viewer/woodyn_viewer --scene pile       # also: tower, showcase, grain, empty
+./build/clang-release/apps/viewer/woodyn_viewer --scene pile       # also: tower, showcase, grain, field, collapse, empty
 ./build/clang-release/apps/viewer/woodyn_viewer --renderer soft    # software renderer
 ```
 
@@ -89,7 +89,13 @@ Headless tools:
 ./build/clang-release/apps/bench/woodyn_bench --scene pile --count 1000 --seconds 10
 # Render impact sounds to a WAV file
 ./build/clang-release/apps/bench/woodyn_bench --scene drops --seconds 8 --wav drops.wav
+# 1,000-block performance scenes: physics only, then the whole frame (GPU included)
+./build/clang-release/apps/bench/woodyn_bench --scene collapse --count 1000 --timeline
+./build/clang-release/apps/viewer/woodyn_viewer --scene collapse --frames 400 --hidden --mute --perf --size 1920x1080
 ```
+
+Performance: 1,000 blocks run at 60 fps on an RTX 3060 (≈ 8–9 ms per frame at
+1080p); measurements and method in [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
 
 ## Controls
 

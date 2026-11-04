@@ -1,8 +1,16 @@
 // woodyn_bench: headless scenario runner for physics tuning and performance (D-10).
 //
-// Usage: woodyn_bench [--scene tower|house|pile|showcase] [--count N] [--seconds S]
-//                     [--threads T] [--seed N] [--trace]
+// Usage: woodyn_bench [--scene tower|house|pile|showcase|drops|field|collapse|knockall]
+//                     [--count N] [--seconds S] [--threads T] [--seed N] [--trace]
+//                     [--timeline] [--csv]
 //                     [--set key=value ...]   (PhysicsTuning overrides, see below)
+//
+// Performance scenes (Phase 5, docs/PERFORMANCE.md), all on the play mat:
+//   field     N cubes as a grid of 10-cube towers, standing (mostly asleep)
+//   collapse  the field; at t = 1 s, 30 % of the towers are pushed over
+//   knockall  the field; at t = 1 s, every tower is pushed over (worst case)
+// Frame statistics group the fixed steps into 60 fps frames (stepHz / 60
+// steps each), i.e. the physics cost the viewer pays per displayed frame.
 
 #include "woodyn/core/Log.hpp"
 #include "woodyn/simulation/ImpactSound.hpp"
@@ -30,6 +38,8 @@ struct Options {
     float seconds = 10.0f;
     std::uint32_t seed = 1234;
     bool trace = false;
+    bool timeline = false; // per-0.25 s active count and frame cost
+    bool csv = false;      // one machine-readable summary line
     std::string wav; // write the synthesized impact sounds to this file
     physics::PhysicsTuning tuning;
 };
@@ -91,6 +101,8 @@ Options parse(int argc, char** argv) {
         else if (a == "--threads") o.tuning.workerThreads = std::stoi(next());
         else if (a == "--seed") o.seed = static_cast<std::uint32_t>(std::stoul(next()));
         else if (a == "--trace") o.trace = true;
+        else if (a == "--timeline") o.timeline = true;
+        else if (a == "--csv") o.csv = true;
         else if (a == "--wav") o.wav = next();
         else if (a == "--set") {
             const std::string kv = next();
@@ -136,7 +148,11 @@ int main(int argc, char** argv) {
     log::init(log::Level::Warn);
 
     simulation::Simulation sim(opt.tuning);
-    if (opt.scene == "drops" || !opt.wav.empty()) sim.addPlayArea();
+    std::vector<std::vector<std::size_t>> towers;
+    const float knockFraction = opt.scene == "collapse" ? 0.3f : opt.scene == "knockall" ? 1.0f : 0.0f;
+    const int knockStep = static_cast<int>(1.0f * opt.tuning.stepHz);
+    const bool field = opt.scene == "field" || opt.scene == "collapse" || opt.scene == "knockall";
+    if (opt.scene == "drops" || field || !opt.wav.empty()) sim.addPlayArea();
     else sim.addFloor(4.0f);
     namespace sc = simulation::scenes;
     if (opt.scene == "tower") sc::buildTower(sim, opt.count);
@@ -144,6 +160,7 @@ int main(int argc, char** argv) {
     else if (opt.scene == "showcase") sc::buildShowcase(sim, {-0.3f, 0.0f, 0.0f});
     else if (opt.scene == "pile") sc::dropPile(sim, opt.count, opt.seed);
     else if (opt.scene == "drops") { /* spawned over time below */ }
+    else if (field) towers = sc::buildTowerField(sim, opt.count);
     else {
         std::fprintf(stderr, "unknown scene: %s\n", opt.scene.c_str());
         return 2;
@@ -155,6 +172,10 @@ int main(int argc, char** argv) {
     const int steps = static_cast<int>(opt.seconds * opt.tuning.stepHz + 0.5f);
     std::vector<double> stepMs;
     stepMs.reserve(static_cast<std::size_t>(steps));
+    std::vector<std::uint32_t> activeAt;
+    activeAt.reserve(static_cast<std::size_t>(steps));
+    double joltMs = 0.0;
+    double bookkeepingMs = 0.0;
     constexpr int kSampleRate = 48000;
     audio::ImpactSynth synth(static_cast<float>(kSampleRate));
     std::vector<float> audioOut;
@@ -171,8 +192,11 @@ int main(int argc, char** argv) {
                 initial.push_back(sim.blocks().back().current);
             }
         }
+        if (knockFraction > 0.0f && i == knockStep) sc::knockTowers(sim, towers, knockFraction);
         const auto t0 = std::chrono::steady_clock::now();
         sim.stepOnce();
+        joltMs += sim.lastStepProfile().physicsMilliseconds;
+        bookkeepingMs += sim.lastStepProfile().bookkeepingMilliseconds;
         if (!opt.wav.empty()) {
             for (const auto& e : sim.takeImpacts()) {
                 simulation::playImpact(synth, sim, e, std::clamp(e.point.x / 0.5f, -1.0f, 1.0f));
@@ -183,6 +207,7 @@ int main(int argc, char** argv) {
         }
         const auto t1 = std::chrono::steady_clock::now();
         stepMs.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+        activeAt.push_back(sim.world().activeBodyCount());
         if (opt.trace && i % static_cast<int>(opt.tuning.stepHz / 10.0f) == 0) {
             float maxSpeed = 0.0f;
             float maxDisp = 0.0f;
@@ -211,14 +236,72 @@ int main(int argc, char** argv) {
     const double avg = sum / static_cast<double>(stepMs.size());
     const double p99 = sorted[static_cast<std::size_t>(0.99 * static_cast<double>(sorted.size() - 1))];
 
+    // Physics cost per displayed 60 fps frame.
+    const int perFrame = std::max(1, static_cast<int>(std::lround(opt.tuning.stepHz / 60.0f)));
+    std::vector<double> frameMs;
+    std::vector<std::uint32_t> frameActive;
+    for (std::size_t i = 0; i + static_cast<std::size_t>(perFrame) <= stepMs.size(); i += static_cast<std::size_t>(perFrame)) {
+        double f = 0.0;
+        std::uint32_t act = 0;
+        for (int k = 0; k < perFrame; ++k) {
+            f += stepMs[i + static_cast<std::size_t>(k)];
+            act = std::max(act, activeAt[i + static_cast<std::size_t>(k)]);
+        }
+        frameMs.push_back(f);
+        frameActive.push_back(act);
+    }
+    std::vector<double> frameSorted = frameMs;
+    std::sort(frameSorted.begin(), frameSorted.end());
+    double frameSum = 0.0;
+    for (double v : frameMs) frameSum += v;
+    const double frameAvg = frameMs.empty() ? 0.0 : frameSum / static_cast<double>(frameMs.size());
+    const double frameP99 = frameSorted.empty() ? 0.0
+        : frameSorted[static_cast<std::size_t>(0.99 * static_cast<double>(frameSorted.size() - 1))];
+    const double frameMax = frameSorted.empty() ? 0.0 : frameSorted.back();
+    const std::uint32_t peakActive = activeAt.empty() ? 0u : *std::max_element(activeAt.begin(), activeAt.end());
+    constexpr double kBudgetMs = 1000.0 / 60.0;
+    const auto overBudget = std::count_if(frameMs.begin(), frameMs.end(), [](double f) { return f > kBudgetMs; });
+
+    if (opt.timeline) {
+        // 0.25 s windows: 15 frames each.
+        constexpr std::size_t kWindow = 15;
+        std::printf("    t[s]  active(max)  frame avg [ms]  frame max [ms]\n");
+        for (std::size_t w = 0; w < frameMs.size(); w += kWindow) {
+            double fs = 0.0;
+            double fm = 0.0;
+            std::uint32_t am = 0;
+            const std::size_t end = std::min(frameMs.size(), w + kWindow);
+            for (std::size_t k = w; k < end; ++k) {
+                fs += frameMs[k];
+                fm = std::max(fm, frameMs[k]);
+                am = std::max(am, frameActive[k]);
+            }
+            std::printf("  %6.2f  %11u  %14.2f  %14.2f\n", static_cast<double>(w) / 60.0, am,
+                        fs / static_cast<double>(end - w), fm);
+        }
+    }
+
     if (!opt.wav.empty()) {
         writeWav(opt.wav, audioOut, kSampleRate);
         std::printf("wrote %s (%.1f s)\n", opt.wav.c_str(),
                     static_cast<double>(audioOut.size()) / 2.0 / kSampleRate);
     }
+    const double totalProfiled = std::max(joltMs + bookkeepingMs, 1e-9);
+    if (opt.csv) {
+        // scene,blocks,threads,stepHz,stepAvg,stepP99,frameAvg,frameP99,frameMax,overBudget,frames,peakActive,finalActive,joltShare
+        std::printf("%s,%zu,%d,%.0f,%.4f,%.4f,%.3f,%.3f,%.3f,%ld,%zu,%u,%u,%.3f\n", opt.scene.c_str(),
+                    sim.blocks().size(), opt.tuning.workerThreads, static_cast<double>(opt.tuning.stepHz), avg, p99,
+                    frameAvg, frameP99, frameMax, static_cast<long>(overBudget), frameMs.size(), peakActive,
+                    sim.world().activeBodyCount(), joltMs / totalProfiled);
+        return 0;
+    }
     std::printf("scene=%s blocks=%zu steps=%d | step avg=%.3f ms p99=%.3f ms max=%.3f ms | "
                 "active=%u maxDisp=%.5f m minY=%.4f m\n",
                 opt.scene.c_str(), sim.blocks().size(), steps, avg, p99, sorted.back(),
                 sim.world().activeBodyCount(), static_cast<double>(maxDisp), static_cast<double>(minY));
+    std::printf("per 60 fps frame (%d steps): avg=%.2f ms p99=%.2f ms max=%.2f ms | over %.1f ms budget: %ld of %zu"
+                " | peak active=%u | Jolt %.0f %% / bookkeeping %.0f %%\n",
+                perFrame, frameAvg, frameP99, frameMax, kBudgetMs, static_cast<long>(overBudget), frameMs.size(),
+                peakActive, 100.0 * joltMs / totalProfiled, 100.0 * bookkeepingMs / totalProfiled);
     return 0;
 }

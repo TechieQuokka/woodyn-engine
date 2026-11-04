@@ -12,6 +12,9 @@ layout(location = 1) out vec3 vLocalNormal;
 layout(location = 2) out vec3 vWorldPos;
 layout(location = 3) out vec3 vWorldNormal;
 layout(location = 4) flat out uint vInstance;
+// The depth-only prepass and the shading pass must produce bit-identical
+// depth (the shading pass tests LESS_OR_EQUAL without writing, D-57).
+invariant gl_Position;
 
 void main() {
     Instance inst = instances[gl_InstanceIndex];

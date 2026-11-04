@@ -315,7 +315,7 @@ struct PhysicsWorld::Impl {
 
         float m = 0.0f;
         {
-            JPH::BodyLockRead lock(system.GetBodyLockInterface(), id);
+            JPH::BodyLockRead lock(system.GetBodyLockInterfaceNoLock(), id);
             if (!lock.Succeeded() || !lock.GetBody().IsDynamic()) {
                 grab.reset();
                 return;
@@ -373,14 +373,14 @@ struct PhysicsWorld::Impl {
             if (grab && grab->body == id) continue;
             if (softHit) {
                 // Foam swallows part of the impact's spin (D-47).
-                JPH::BodyLockWrite soft(system.GetBodyLockInterface(), id);
+                JPH::BodyLockWrite soft(system.GetBodyLockInterfaceNoLock(), id);
                 if (soft.Succeeded() && soft.GetBody().IsDynamic()) {
                     JPH::Body& sb = soft.GetBody();
                     sb.SetAngularVelocity(sb.GetAngularVelocity() * tuning.softImpactSpinRetention);
                 }
             }
             if (crr <= 0.0f) continue;
-            JPH::BodyLockWrite lock(system.GetBodyLockInterface(), id);
+            JPH::BodyLockWrite lock(system.GetBodyLockInterfaceNoLock(), id);
             if (!lock.Succeeded()) continue;
             JPH::Body& body = lock.GetBody();
             if (!body.IsDynamic()) continue;
@@ -400,8 +400,9 @@ struct PhysicsWorld::Impl {
     JPH::Vec3 len(const glm::vec3& v) const { return toJolt(v * scale); }
     glm::vec3 len(JPH::Vec3Arg v) const { return fromJolt(v) * invScale; }
 
-    JPH::BodyInterface& bodies() { return system.GetBodyInterface(); }
-    const JPH::BodyInterface& bodies() const { return system.GetBodyInterface(); }
+    // Single-threaded API (see PhysicsWorld): no body locks needed (D-58).
+    JPH::BodyInterface& bodies() { return system.GetBodyInterfaceNoLock(); }
+    const JPH::BodyInterface& bodies() const { return system.GetBodyInterfaceNoLock(); }
 };
 
 PhysicsWorld::PhysicsWorld(const PhysicsTuning& tuning) {
@@ -509,7 +510,7 @@ glm::vec3 PhysicsWorld::angularVelocity(BodyId id) const {
 }
 
 float PhysicsWorld::mass(BodyId id) const {
-    JPH::BodyLockRead lock(m_impl->system.GetBodyLockInterface(), toJolt(id));
+    JPH::BodyLockRead lock(m_impl->system.GetBodyLockInterfaceNoLock(), toJolt(id));
     if (!lock.Succeeded()) {
         return 0.0f;
     }
@@ -543,7 +544,7 @@ std::optional<RayHit> PhysicsWorld::castRay(const glm::vec3& origin, const glm::
     if (len < 1e-9f || maxDistance <= 0.0f) return std::nullopt;
     const JPH::RRayCast ray{m_impl->len(origin), m_impl->len(direction * (maxDistance / len))};
     JPH::RayCastResult hit;
-    const auto& query = m_impl->system.GetNarrowPhaseQuery();
+    const auto& query = m_impl->system.GetNarrowPhaseQueryNoLock();
     bool found = false;
     if (blocksOnly) {
         const JPH::SpecifiedBroadPhaseLayerFilter bpFilter(BroadPhaseLayers::kMoving);
@@ -563,7 +564,7 @@ std::optional<Transform> PhysicsWorld::dropPreview(BodyId id, float maxDrop) con
     JPH::RMat44 world;
     JPH::Quat rotation;
     {
-        JPH::BodyLockRead lock(m_impl->system.GetBodyLockInterface(), toJolt(id));
+        JPH::BodyLockRead lock(m_impl->system.GetBodyLockInterfaceNoLock(), toJolt(id));
         if (!lock.Succeeded()) return std::nullopt;
         shape = lock.GetBody().GetShape();
         world = lock.GetBody().GetWorldTransform();
@@ -575,7 +576,7 @@ std::optional<Transform> PhysicsWorld::dropPreview(BodyId id, float maxDrop) con
     JPH::ShapeCastSettings settings;
     JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
     const JPH::IgnoreSingleBodyFilter ignoreSelf(toJolt(id));
-    m_impl->system.GetNarrowPhaseQuery().CastShape(cast, settings, JPH::RVec3::sZero(), collector,
+    m_impl->system.GetNarrowPhaseQueryNoLock().CastShape(cast, settings, JPH::RVec3::sZero(), collector,
                                                    {}, {}, ignoreSelf);
     if (!collector.HadHit()) return std::nullopt;
     const JPH::Vec3 origin = world.GetTranslation();
@@ -593,7 +594,7 @@ std::optional<Transform> PhysicsWorld::placementPreview(blocks::BlockType type, 
     JPH::ShapeCastSettings settings;
     settings.mReturnDeepestPoint = true; // report how deep an initial overlap is
     JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
-    m_impl->system.GetNarrowPhaseQuery().CastShape(cast, settings, JPH::RVec3::sZero(), collector);
+    m_impl->system.GetNarrowPhaseQueryNoLock().CastShape(cast, settings, JPH::RVec3::sZero(), collector);
     if (!collector.HadHit()) return std::nullopt;
     // Starting in penetration means the spot is occupied.
     if (collector.mHit.mFraction <= 0.0f && collector.mHit.mPenetrationDepth > 0.0005f * m_impl->scale) {

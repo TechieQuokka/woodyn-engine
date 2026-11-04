@@ -19,6 +19,10 @@
 //
 // Headless verification:
 //   woodyn_viewer --scene house --frames 300 --screenshot out.bmp [--hidden] [--demo-grab]
+// Performance (Phase 5, docs/PERFORMANCE.md):
+//   woodyn_viewer --scene field|collapse --frames 600 --hidden --perf
+//   field: 1,000 cubes as 100 standing towers; collapse: the same, 30 % pushed over at t = 1 s.
+//   --perf prints frame time statistics at exit (vsync is off with --frames).
 
 #include "DebugRenderer.hpp"
 #include "GpuView.hpp"
@@ -65,6 +69,10 @@ struct Options {
     bool demoPlace = false;       // scripted placement for headless checks
     float zoom = 0.0f;        // camera distance override (screenshots)
     float yaw = -100.0f;      // camera yaw override [rad], -100 = keep default
+    bool perf = false;        // print frame time statistics at exit
+    int width = 1280;         // window / offscreen size
+    int height = 800;
+    std::vector<std::string> effectsOff; // --off ssao,dof,bloom,detail (profiling)
 };
 
 Options parse(int argc, char** argv) {
@@ -84,6 +92,22 @@ Options parse(int argc, char** argv) {
         else if (a == "--demo-place") o.demoPlace = true;
         else if (a == "--zoom") o.zoom = std::stof(next());
         else if (a == "--yaw") o.yaw = std::stof(next());
+        else if (a == "--perf") o.perf = true;
+        else if (a == "--size") {
+            const std::string v = next();
+            const auto x = v.find('x');
+            if (x != std::string::npos) {
+                o.width = std::stoi(v.substr(0, x));
+                o.height = std::stoi(v.substr(x + 1));
+            }
+        } else if (a == "--off") {
+            std::string v = next();
+            for (std::size_t p = 0; p != std::string::npos;) {
+                const auto c = v.find(',', p);
+                o.effectsOff.push_back(v.substr(p, c == std::string::npos ? std::string::npos : c - p));
+                p = c == std::string::npos ? c : c + 1;
+            }
+        }
         else std::fprintf(stderr, "ignoring unknown argument: %s\n", a.c_str());
     }
     return o;
@@ -160,6 +184,9 @@ public:
         : m_renderer(renderer), m_muted(mute) {
         m_window = window;
         m_sim.addPlayArea();
+        // Physics may take at most 10 ms of a 16.7 ms frame; beyond that the
+        // simulation slows down briefly instead of the frame rate dropping (D-59).
+        m_sim.physicsBudgetMilliseconds = kPhysicsBudgetMs;
         if (device) {
             m_gpuView = std::make_unique<viewer::GpuView>(device, renderer, *m_sim.playArea());
             if (!m_gpuView->ok()) {
@@ -182,6 +209,15 @@ public:
     void setPhotoDetail(bool on) {
         if (m_gpuView) m_gpuView->settings.photoDetail = on;
     }
+    void disableEffect(const std::string& name) {
+        if (!m_gpuView) return;
+        auto& st = m_gpuView->settings;
+        if (name == "ssao") st.ssao = st.contactShadows = false;
+        else if (name == "dof") st.dof = false;
+        else if (name == "bloom") st.bloom = false;
+        else if (name == "detail") st.photoDetail = false;
+        else log::warn("unknown effect '{}' (ssao, dof, bloom, detail)", name);
+    }
 
     void loadScene(const std::string& name, bool undoable = true) {
         if (undoable) pushUndo();
@@ -192,6 +228,10 @@ public:
         else if (name == "showcase") scenes::buildShowcase(m_sim, {-0.4f, 0.0f, 0.0f}, m_species);
         else if (name == "pile") scenes::dropPile(m_sim, 100, m_seed++, {}, m_species);
         else if (name == "grain") scenes::buildGrainDemo(m_sim, m_species);
+        else if (name == "field" || name == "collapse") {
+            m_towers = scenes::buildTowerField(m_sim, 1000);
+            m_knockAt = name == "collapse" ? m_sim.simulatedSeconds() + 1.0 : -1.0;
+        }
         else if (name != "empty") log::warn("unknown scene '{}'", name);
     }
 
@@ -323,11 +363,19 @@ public:
         turnWhileKeysHeld(dt);
         updatePlacement();
 
+        if (m_knockAt >= 0.0 && m_sim.simulatedSeconds() >= m_knockAt) {
+            scenes::knockTowers(m_sim, m_towers, 0.3f);
+            m_knockAt = -1.0;
+        }
         const auto stats = m_sim.advance(dt);
         m_physicsMs = 0.9 * m_physicsMs + 0.1 * stats.physicsMilliseconds;
         m_fps = 0.95 * m_fps + 0.05 * (dt > 0.0f ? 1.0 / static_cast<double>(dt) : 0.0);
+        m_lastPhysicsMs = stats.physicsMilliseconds;
+        m_lastDroppedSteps = stats.droppedSteps;
+        if (stats.droppedSteps > 0) m_slowMotionUntil = m_clock + 0.5;
         playSounds();
 
+        const auto drawStart = SDL_GetTicksNS();
         if (m_gpuView) m_gpuView->draw(m_sim, m_camera, buildOverlay());
         else m_draw->draw(m_sim, m_camera, buildOverlay());
         int w = 0, h = 0;
@@ -337,7 +385,18 @@ public:
         m_shelf.draw(m_renderer, m_nextStain, m_species, m_mouse.x, m_mouse.y, toyBoxHot,
                      m_placement ? std::optional<blocks::BlockType>(m_placement->type) : std::nullopt);
         if (!m_clean) drawHud();
+        m_lastDrawMs = static_cast<double>(SDL_GetTicksNS() - drawStart) * 1e-6;
+        m_drawMs = 0.9 * m_drawMs + 0.1 * m_lastDrawMs;
     }
+
+    /// Wall time of the last frame's physics and CPU drawing [ms] (profiling).
+    [[nodiscard]] double lastPhysicsMs() const { return m_lastPhysicsMs; }
+    [[nodiscard]] double lastDrawMs() const { return m_lastDrawMs; }
+    [[nodiscard]] int lastDroppedSteps() const { return m_lastDroppedSteps; }
+    [[nodiscard]] std::uint32_t activeBodies() const { return m_sim.world().activeBodyCount(); }
+    [[nodiscard]] std::size_t blockCount() const { return m_sim.blocks().size(); }
+    /// Smoothed wall time of whole frames, measured by the main loop [ms].
+    void setFrameMs(double ms) { m_frameMs = 0.9 * m_frameMs + 0.1 * ms; }
 
     /// Scripted placement (--demo-place): place an arch at the screen center,
     /// then hold a beam ghost over the arch (valid, on top) for the screenshot.
@@ -715,9 +774,10 @@ private:
     /// The full HUD (F1): status, controls and render settings.
     void drawHudPanel() {
         char line[256];
-        std::snprintf(line, sizeof(line), "WOODYN | %.0f fps | physics %.2f ms @ %.0f Hz | blocks %zu (active %u)%s",
-                      m_fps, m_physicsMs, static_cast<double>(m_sim.world().tuning().stepHz),
-                      m_sim.blocks().size(), m_sim.world().activeBodyCount(), m_sim.paused ? " | PAUSED" : "");
+        std::snprintf(line, sizeof(line), "WOODYN | %.0f fps | frame %.1f ms: physics %.1f ms @ %.0f Hz, draw %.1f ms | blocks %zu (active %u)%s",
+                      m_fps, m_frameMs, m_physicsMs, static_cast<double>(m_sim.world().tuning().stepHz), m_drawMs,
+                      m_sim.blocks().size(), m_sim.world().activeBodyCount(),
+                      m_sim.paused ? " | PAUSED" : (m_clock < m_slowMotionUntil ? " | SLOW MOTION (physics over budget)" : ""));
         text(10.0f, 10.0f, line);
         std::snprintf(line, sizeof(line), "%s | next color: %s | sound: %s%s",
                       std::string(materials::toString(m_species)).c_str(),
@@ -760,7 +820,19 @@ private:
     std::mt19937 m_rng{7};
     std::uint32_t m_seed = 1;
     double m_physicsMs = 0.0;
+    double m_drawMs = 0.0;
+    double m_frameMs = 0.0;
+    double m_lastPhysicsMs = 0.0;
+    double m_lastDrawMs = 0.0;
     double m_fps = 60.0;
+    std::vector<std::vector<std::size_t>> m_towers; // performance scenes
+    double m_knockAt = -1.0;                        // collapse scene: push time [s]
+    double m_slowMotionUntil = -1.0;
+    int m_lastDroppedSteps = 0;                // HUD notice after dropped physics steps
+    static constexpr double kPhysicsBudgetMs = 10.0;
+
+public:
+    static constexpr double physicsBudgetMs() { return kPhysicsBudgetMs; }
     bool m_showHud = false; // F1: status, controls and render settings
     bool m_muted = false;
     SDL_FPoint m_mouse{-1.0f, -1.0f};
@@ -796,10 +868,10 @@ int main(int argc, char** argv) {
         // renderer on the same device composites it with the HUD and presents.
         device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr);
         if (device) {
-            if (!opt.hidden) window = SDL_CreateWindow(title, 1280, 800, flags);
+            if (!opt.hidden) window = SDL_CreateWindow(title, opt.width, opt.height, flags);
             renderer = SDL_CreateGPURenderer(device, window); // no window -> offscreen
             if (renderer && opt.hidden) {
-                offscreen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, 1280, 800);
+                offscreen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, opt.width, opt.height);
                 SDL_SetRenderTarget(renderer, offscreen);
             }
         }
@@ -811,7 +883,7 @@ int main(int argc, char** argv) {
             device = nullptr;
         }
     }
-    if (!renderer && !SDL_CreateWindowAndRenderer(title, 1280, 800, flags, &window, &renderer)) {
+    if (!renderer && !SDL_CreateWindowAndRenderer(title, opt.width, opt.height, flags, &window, &renderer)) {
         log::error("SDL_CreateWindowAndRenderer failed: {}", SDL_GetError());
         SDL_Quit();
         return 1;
@@ -826,11 +898,14 @@ int main(int argc, char** argv) {
         if (opt.zoom > 0.0f) app.camera().distance = opt.zoom;
         if (opt.yaw > -99.0f) app.camera().yaw = opt.yaw;
         if (opt.noPhotoDetail) app.setPhotoDetail(false);
+        for (const auto& e : opt.effectsOff) app.disableEffect(e);
         if (opt.clean) app.setClean();
 
         Uint64 last = SDL_GetTicksNS();
         bool running = true;
         int frame = 0;
+        struct FrameSample { double total, physics, draw, gpuWait; std::uint32_t active; int dropped; };
+        std::vector<FrameSample> samples;
         while (running) {
             SDL_Event e;
             while (SDL_PollEvent(&e)) {
@@ -859,7 +934,48 @@ int main(int argc, char** argv) {
                 }
             }
             SDL_RenderPresent(renderer);
+            // --perf: wait for the GPU every frame so the frame time includes the
+            // GPU work (offscreen rendering has no swapchain to throttle it).
+            double gpuWaitMs = 0.0;
+            if (opt.perf && device) {
+                const Uint64 w0 = SDL_GetTicksNS();
+                SDL_WaitForGPUIdle(device);
+                gpuWaitMs = static_cast<double>(SDL_GetTicksNS() - w0) * 1e-6;
+            }
+            const double frameMs = static_cast<double>(SDL_GetTicksNS() - now) * 1e-6;
+            app.setFrameMs(frameMs);
+            if (opt.perf) samples.push_back({frameMs, app.lastPhysicsMs(), app.lastDrawMs(), gpuWaitMs, app.activeBodies(),
+                                           app.lastDroppedSteps()});
             if (lastFrame) running = false;
+        }
+        if (opt.perf && samples.size() > 30) {
+            // Skip the first frames (pipeline creation, first uploads).
+            samples.erase(samples.begin(), samples.begin() + 30);
+            auto stat = [&](auto member, const char* name) {
+                std::vector<double> v;
+                for (const auto& s : samples) v.push_back(s.*member);
+                std::sort(v.begin(), v.end());
+                double sum = 0.0;
+                for (double x : v) sum += x;
+                std::printf("  %-8s avg %6.2f ms  p50 %6.2f  p99 %6.2f  max %6.2f\n", name, sum / static_cast<double>(v.size()),
+                            v[v.size() / 2], v[static_cast<std::size_t>(0.99 * static_cast<double>(v.size() - 1))], v.back());
+            };
+            std::uint32_t peak = 0;
+            int dropped = 0;
+            int slowFrames = 0;
+            for (const auto& s : samples) {
+                peak = std::max(peak, s.active);
+                dropped += s.dropped;
+                slowFrames += s.dropped > 0 ? 1 : 0;
+            }
+            std::printf("perf: scene=%s blocks=%zu frames=%zu peak active=%u (%dx%d, vsync off) | "
+                        "physics budget %.0f ms: %d steps dropped in %d frames\n", opt.scene.c_str(),
+                        app.blockCount(), samples.size(), peak, opt.width, opt.height, App::physicsBudgetMs(), dropped,
+                        slowFrames);
+            stat(&FrameSample::total, "frame");
+            stat(&FrameSample::physics, "physics");
+            stat(&FrameSample::draw, "draw");
+            stat(&FrameSample::gpuWait, "gpu wait");
         }
     }
 

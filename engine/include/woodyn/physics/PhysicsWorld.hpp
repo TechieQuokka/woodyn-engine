@@ -60,6 +60,10 @@ struct ImpactEvent {
 /// Thin wrapper around Jolt Physics. Jolt types never appear in this header so
 /// the rest of the engine (and the renderer) stays independent of the physics
 /// back-end (DESIGN.md §7).
+///
+/// Not thread-safe: every call must come from one thread (Jolt's worker
+/// threads only run inside step()). Body access therefore skips Jolt's body
+/// locks (D-58).
 class PhysicsWorld {
 public:
     explicit PhysicsWorld(const PhysicsTuning& tuning = {});

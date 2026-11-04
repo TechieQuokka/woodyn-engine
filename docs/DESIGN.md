@@ -373,6 +373,8 @@ Woodyn/
 
 ### Phase 5 — Performance and Quality
 
+Done (D-55..D-60, [`PERFORMANCE.md`](PERFORMANCE.md)):
+
 - GPU Instancing
 - Measure multithreaded physics performance
 - Large-scale block benchmarks
@@ -574,11 +576,25 @@ Measured: a cube dropped at 25° onto the mat hit with a corner, flipped onto a 
 | D-53 | Picking through invisible bounds (bug fix) | User report: with the camera zoomed out or orbited outside the 0.6 m walls, clicking placed nothing and a huge red ghost appeared. Cause: the pointer ray hit the **invisible walls/ceiling** first, so the ghost sat inside a wall right in front of the camera (perspective made it look huge and "resize" as the pointer moved). Fix: invisible bounds live in their own object layer (`kBounds`) that still collides with blocks but is ignored by all picking ray casts (`SurfaceProperties::pickable = false`). Verified at camera distances 0.5 / 0.75 / 1.2 / 1.6 m; regression tests `Placement.PickingIgnoresInvisibleWallsAndCeiling`, `Placement.InvisibleWallsStillStopBlocks`. Lesson: interaction must be verified from several camera positions, not one. | 2026-11-04 |
 | D-54 | HUD hidden by default (user choice 1 + 3) | The top-left HUD (status, controls, render settings) starts **hidden**; only a small `F1: help` hint is drawn. F1 toggles the whole HUD (previously it toggled only the four help lines). The heading/tilt readout (D-44) stays visible while rotating even with the HUD hidden, moved up under the hint. `--clean` still hides everything. | 2026-11-04 |
 
-### Known Issues / Open Items (after Phase 4)
+### Phase 5 — Performance and Quality
+
+Measurements, hardware and commands: [`docs/PERFORMANCE.md`](PERFORMANCE.md).
+
+| ID   | Topic               | Decision | Date |
+| ---- | ------------------- | -------- | ---- |
+| D-55 | 60 fps criterion and tooling (user choice A) | D-10 is judged on **toy play**: 1,000 blocks mostly asleep, with collapses that set a few hundred in motion at once, must hold 60 fps. The extreme case (all 1,000 moving at once) may slow down briefly but must never stall. Scenes `field` (1,000 cubes as 100 standing towers), `collapse` (30 % of the towers pushed over at t = 1 s) and `knockall` (all of them) in `woodyn_bench` and the viewer. The bench groups fixed steps into 60 fps frames (`--timeline`, `--csv`); the viewer gains `--perf` (frame statistics; waits for the GPU each frame, since offscreen rendering has no swapchain to throttle it), `--size WxH`, `--off ssao,dof,bloom,detail` and a frame-time line in the F1 HUD. | 2026-11-04 |
+| D-56 | Back-face culling | Measured first: the frame was **GPU fragment bound** (GPU time scaled with resolution; 1,000 blocks: 13.2 ms at 1280×800, 22.4 ms at 1080p, i.e. 1080p missed 60 fps). All pipelines had culling off, so the wood shader also shaded every hidden back face. Block meshes are closed and CCW from outside (guarded by `RenderMeshTest.NormalsAreUnitAndAgreeWithWinding`), so the wood, prepass and depth pipelines now cull back faces. The translucent ghost keeps its back faces (they make it read as a volume; culling them visibly paled it). → 8.8 / 15.4 ms. | 2026-11-04 |
+| D-57 | Depth prepass in the MSAA pass | The main pass first draws all blocks depth-only (color write mask 0), then the room, then the wood shader with LESS_OR_EQUAL and no depth write, so the expensive procedural grain runs once per visible pixel instead of once per overlapping surface. `invariant gl_Position` in `wood.vert` keeps both passes' depth bit-identical. → **4.2 / 7.5 ms** (−68 % / −67 % vs. before D-56). Pixel comparison against the previous renderer (house near/default/far, showcase, grain, placement ghost): max difference ≤ 3/255 except 8 isolated silhouette pixels. | 2026-11-04 |
+| D-58 | Lock-free body access | `PhysicsWorld` is single-threaded by contract (Jolt's workers only run inside `step()`), so it uses Jolt's NoLock body interface, body lock interface and narrow-phase query. The per-step bookkeeping (bounds check + transform capture of every block) was 59 % of the physics time of a resting 1,000-block field; resting physics per frame 0.40 → 0.15 ms (viewer), and active scenes gain too. | 2026-11-04 |
+| D-59 | Physics time budget | `Simulation::physicsBudgetMilliseconds` (viewer: 10 ms of the 16.7 ms frame; default 0 = off for tests and tools). When a frame's physics runs out of budget, its remaining fixed steps are dropped: the simulation runs in slow motion for a moment instead of the frame rate collapsing (no spiral of death). At least one step always runs; dropped steps do not advance simulated time and are not caught up later. The F1 HUD shows "SLOW MOTION" while it happens. Tests `PhysicsBudget.*`. | 2026-11-04 |
+| D-60 | Measured and left as is | **Frustum culling / LOD:** not added. All 1,000 blocks in every pass cost ≈ 0.7 ms of GPU time (320×200 run), so culling off-screen blocks could save well under 1 ms. **Worker threads:** stay at hardware threads − 1 (i3-14100F, 4C/8T: `knockall` 3.7 → 1.9 ms per frame from 1 → 7 threads; scaling is limited by 480 Hz steps of ~0.25 ms). **480 Hz (D-11) kept:** after D-58 the play scenes need 0.2–2 ms of physics per frame; D-11's 9.7 ms estimate was for 1,000 blocks all in free fall (`pile`, now 9.9 ms avg per frame, over budget in ~1 % of frames, handled by D-59). **Textures/shaders:** nothing else stood out in the measurements; the photo-detail texture is 1024² and the remaining cost is resolution-bound post-processing. | 2026-11-04 |
+
+### Known Issues / Open Items (after Phase 5)
 
 - **End grain has no photo detail** (no suitable CC0 end-grain photo; procedural only).
 - **Oak uses the same fiber photo as beech** (fine for micro detail; a ring-porous photo would be better).
-- **No GPU frustum culling / LOD yet:** fine for the 1,000-block target on the RTX 3060, revisit in Phase 5.
+- **No frustum culling / LOD:** measured unnecessary for 1,000 blocks (D-60); revisit for much larger scenes.
+- **1,000 blocks in free fall at once** (`pile`) exceed the physics budget and run in slow motion for a moment (D-59).
 - **Sound calibration:** mode tables are perceptual estimates; no sliding/rolling sounds yet.
 - **Very tall towers:** 20-cube towers need ≥ 600 Hz (D-11).
 - **Static vs kinetic friction:** single coefficient (D-15).

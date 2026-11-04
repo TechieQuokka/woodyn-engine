@@ -17,6 +17,7 @@ add_executable(woodyn_tests
     audio/ImpactSynthTests.cpp
     simulation/SnapshotTests.cpp
     simulation/PlacementTests.cpp
+    simulation/PerformanceSceneTests.cpp
     wood/GrainContinuityTests.cpp
 )
 
