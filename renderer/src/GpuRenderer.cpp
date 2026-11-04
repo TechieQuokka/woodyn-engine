@@ -699,7 +699,7 @@ SDL_GPUTexture* GpuRenderer::render(int width, int height, const Camera& camera,
         m.drawBatches(pass, batches);
 
         if (ghostBatch) {
-            const glm::vec4 ghostU[2] = {glm::vec4(camera.eye, 1.0f), glm::vec4(0.45f, 0.70f, 1.0f, 0.32f)};
+            const glm::vec4 ghostU[2] = {glm::vec4(camera.eye, 1.0f), ghost->color};
             SDL_BindGPUGraphicsPipeline(pass, m.ghostPipe);
             SDL_BindGPUVertexStorageBuffers(pass, 0, &m.instanceBuffer, 1);
             SDL_PushGPUFragmentUniformData(cmd, 0, ghostU, sizeof(ghostU));

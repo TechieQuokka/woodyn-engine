@@ -120,7 +120,7 @@ void Shelf::layout(int width, int height) {
     const float swatch = 22.0f * m_scale;
     const float columns = std::ceil(static_cast<float>(materials::kAllStains.size()) / 2.0f);
     const float swatchArea = columns * (swatch + gap * 0.5f) + gap;
-    const float w = static_cast<float>(blocks::kAllBlockTypes.size()) * (slot + gap) + gap + swatchArea + gap;
+    const float w = static_cast<float>(blocks::kAllBlockTypes.size()) * (slot + gap) + gap + swatchArea + gap + slot + gap;
     const float h = slot + 2.0f * gap;
     m_panel = {(static_cast<float>(width) - w) * 0.5f, static_cast<float>(height) - h - 12.0f * m_scale, w, h};
     for (std::size_t i = 0; i < m_slots.size(); ++i) {
@@ -133,6 +133,7 @@ void Shelf::layout(int width, int height) {
         const float row = static_cast<float>(i % 2u);
         m_swatches[i] = {sx + col * (swatch + gap * 0.5f), m_panel.y + gap + row * (swatch + gap), swatch, swatch};
     }
+    m_toyBox = {m_panel.x + m_panel.w - gap - slot, m_panel.y + gap, slot, slot};
 }
 
 bool Shelf::contains(float x, float y) const { return visible && inside(m_panel, x, y); }
@@ -145,11 +146,14 @@ std::optional<Shelf::Hit> Shelf::hitTest(float x, float y) const {
     for (std::size_t i = 0; i < m_swatches.size(); ++i) {
         if (inside(m_swatches[i], x, y)) return StainSwatch{materials::kAllStains[i]};
     }
+    if (inside(m_toyBox, x, y)) return ToyBox{};
     return std::nullopt;
 }
 
+bool Shelf::overToyBox(float x, float y) const { return visible && inside(m_toyBox, x, y); }
+
 void Shelf::draw(SDL_Renderer* r, materials::Stain nextStain, materials::WoodSpecies species, float mx,
-                 float my) const {
+                 float my, bool toyBoxHot, std::optional<blocks::BlockType> placing) const {
     if (!visible) return;
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
     // Wooden shelf board.
@@ -160,7 +164,10 @@ void Shelf::draw(SDL_Renderer* r, materials::Stain nextStain, materials::WoodSpe
     for (std::size_t i = 0; i < m_slots.size(); ++i) {
         const SDL_FRect& s = m_slots[i];
         const bool hover = inside(s, mx, my);
+        const bool active = placing && *placing == blocks::kAllBlockTypes[i];
         if (hover) hovered = i;
+        if (active) roundedRect(r, {s.x - 3.0f * m_scale, s.y - 3.0f * m_scale, s.w + 6.0f * m_scale, s.h + 6.0f * m_scale},
+                                12.0f * m_scale, {0.45f, 0.70f, 1.0f, 1.0f});
         roundedRect(r, s, 10.0f * m_scale, hover ? SDL_FColor{1.0f, 0.97f, 0.90f, 1.0f} : SDL_FColor{0.98f, 0.92f, 0.82f, 1.0f});
         std::vector<SDL_Vertex> v;
         const float pad = 8.0f * m_scale;
@@ -184,6 +191,35 @@ void Shelf::draw(SDL_Renderer* r, materials::Stain nextStain, materials::WoodSpe
         const bool selected = materials::kAllStains[i] == nextStain;
         if (selected || inside(s, mx, my)) disc(r, c, s.w * 0.5f + 2.5f * m_scale, selected ? SDL_FColor{0.35f, 0.25f, 0.15f, 1.0f} : SDL_FColor{1, 1, 1, 0.9f});
         disc(r, c, s.w * 0.5f, stainedColor(materials::kAllStains[i], species, 1.0f));
+    }
+
+    // Toy box: an open wooden crate; glows when a held block is over it.
+    {
+        const SDL_FRect& b = m_toyBox;
+        const float k = m_scale;
+        if (toyBoxHot) roundedRect(r, {b.x - 3 * k, b.y - 3 * k, b.w + 6 * k, b.h + 6 * k}, 12 * k, {1.0f, 0.80f, 0.35f, 1.0f});
+        roundedRect(r, b, 10 * k, inside(b, mx, my) || toyBoxHot ? SDL_FColor{1.0f, 0.97f, 0.90f, 1.0f} : SDL_FColor{0.98f, 0.92f, 0.82f, 1.0f});
+        const SDL_FColor dark{0.55f, 0.36f, 0.20f, 1.0f};
+        const SDL_FColor wood{0.80f, 0.58f, 0.36f, 1.0f};
+        const SDL_FColor inner{0.40f, 0.26f, 0.15f, 1.0f};
+        const float x0 = b.x + 10 * k, x1 = b.x + b.w - 10 * k;
+        const float yTop = b.y + b.h * 0.38f, yBot = b.y + b.h - 10 * k;
+        const SDL_Vertex v[] = {
+            // opening (back inner wall)
+            {{x0 + 4 * k, yTop - 8 * k}, inner, {}}, {{x1 - 4 * k, yTop - 8 * k}, inner, {}}, {{x1, yTop}, inner, {}},
+            {{x0 + 4 * k, yTop - 8 * k}, inner, {}}, {{x1, yTop}, inner, {}}, {{x0, yTop}, inner, {}},
+            // front panel
+            {{x0, yTop}, wood, {}}, {{x1, yTop}, wood, {}}, {{x1, yBot}, dark, {}},
+            {{x0, yTop}, wood, {}}, {{x1, yBot}, dark, {}}, {{x0, yBot}, dark, {}},
+        };
+        SDL_RenderGeometry(r, nullptr, v, 12, nullptr, 0);
+        SDL_SetRenderDrawColorFloat(r, 0.40f, 0.26f, 0.15f, 1.0f);
+        SDL_RenderLine(r, x0, (yTop + yBot) * 0.5f, x1, (yTop + yBot) * 0.5f);
+        if (inside(b, mx, my) || toyBoxHot) {
+            const char* label = "Toy box";
+            SDL_SetRenderDrawColorFloat(r, 0.30f, 0.22f, 0.14f, 1.0f);
+            SDL_RenderDebugText(r, b.x + (b.w - 56.0f) * 0.5f, m_panel.y - 12.0f * m_scale, label);
+        }
     }
 
     if (hovered) {

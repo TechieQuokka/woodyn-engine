@@ -45,6 +45,7 @@ grain.
 **Play**
 - Physics-based grab-and-drag with a natural grip, drop preview, throwing
 - Rotate held blocks in 1° steps (hold to keep turning) or 90° steps
+- Placement mode with a ghost preview, a toy box to put blocks away, undo/redo
 - Toy shelf UI, color swatches, keyboard + mouse controls, fullscreen
 - Modal-synthesis impact sounds: every block rings with its own size-dependent pitch
 
@@ -67,7 +68,7 @@ git clone https://github.com/TechieQuokka/woodyn-engine.git
 cd woodyn-engine
 cmake --preset clang-release        # or clang-debug / gcc-debug
 cmake --build --preset clang-release
-ctest --preset clang-release        # 137 tests (GPU tests skip without Vulkan)
+ctest --preset clang-release        # 142 tests (GPU tests skip without Vulkan)
 ```
 
 The presets expect `clang++-23` in `/usr/bin` and `ninja` in `/usr/local/bin`;
@@ -94,17 +95,19 @@ Headless tools:
 
 | Input | Action |
 | ----- | ------ |
+| Shelf shape or `1`–`9` | placement mode: a ghost follows the pointer (red where it can't go) |
+| Placing: click / Shift+click / right-click or `Esc` | place gently / place and keep placing / cancel |
 | Left-drag a block | pick it up and carry it |
-| Bottom shelf | press a shape to take a new block; swatches pick the color; `Tab` hides the shelf |
+| Drop on the toy box (shelf, right end) · `Delete` | put the block away · delete the held/hovered block |
+| Shelf swatches · `Tab` | pick the next color · hide the shelf |
 | While holding: Shift+mouse or wheel | raise / lower |
-| While holding: `Q` / `E` turn, `R` / `F` tip | tap = 1°, hold = keep turning, Shift = 90° |
-| While holding: Ctrl+wheel / Ctrl+mouse / Ctrl+Shift+mouse | 1° per notch / free turn / fine turn |
-| While holding: hold `Space` | gently align to a square orientation |
+| Holding or placing: `Q` / `E` turn, `R` / `F` tip | tap = 1°, hold = keep turning, Shift = 90° |
+| Holding or placing: Ctrl+wheel / Ctrl+mouse / Ctrl+Shift+mouse | 1° per notch / free turn / fine turn |
+| Holding or placing: hold `Space` | gently align to a square orientation |
 | Release | drop or throw (a blue ghost previews where it lands) |
 | `W` `A` `S` `D` · right-drag · middle-drag · wheel | move · orbit · pan · zoom the camera |
-| `1`–`9` | new block at the cursor |
 | `C` / `O` | recolor the held or hovered block / beech ↔ oak |
-| `F2`–`F6` · `Delete` | scenes (tower, house, showcase, pile, grain) · clear |
+| `F2`–`F6` · `Shift+Delete` | scenes (tower, house, showcase, pile, grain) · clear everything |
 | `Ctrl+Z` / `Ctrl+Y` | undo / redo |
 | `F7` `F8` `F9` `F10` | depth of field · AO + contact shadows · bloom · photo wood detail |
 | `F11` · `P` · `M` · `F1` · `Esc` | fullscreen · pause · mute · help · quit |

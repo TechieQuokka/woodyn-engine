@@ -571,6 +571,27 @@ std::optional<Transform> PhysicsWorld::dropPreview(BodyId id, float maxDrop) con
     return Transform{m_impl->len(origin + direction * collector.mHit.mFraction), fromJolt(rotation)};
 }
 
+std::optional<Transform> PhysicsWorld::placementPreview(blocks::BlockType type, materials::WoodSpecies species,
+                                                       const glm::quat& rotation, const glm::vec3& start,
+                                                       float maxDrop) const {
+    const auto shape = m_impl->shapes.blockShape(type, materials::physicalProperties(species).density);
+    const JPH::RMat44 world = JPH::RMat44::sRotationTranslation(toJolt(glm::normalize(rotation)), m_impl->len(start));
+    const JPH::Vec3 direction(0.0f, -maxDrop * m_impl->scale, 0.0f);
+    const JPH::RShapeCast cast =
+        JPH::RShapeCast::sFromWorldTransform(shape, JPH::Vec3::sReplicate(1.0f), world, direction);
+    JPH::ShapeCastSettings settings;
+    settings.mReturnDeepestPoint = true; // report how deep an initial overlap is
+    JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
+    m_impl->system.GetNarrowPhaseQuery().CastShape(cast, settings, JPH::RVec3::sZero(), collector);
+    if (!collector.HadHit()) return std::nullopt;
+    // Starting in penetration means the spot is occupied.
+    if (collector.mHit.mFraction <= 0.0f && collector.mHit.mPenetrationDepth > 0.0005f * m_impl->scale) {
+        return std::nullopt;
+    }
+    const glm::vec3 offset = glm::vec3(0.0f, -maxDrop, 0.0f) * collector.mHit.mFraction;
+    return Transform{start + offset, glm::normalize(rotation)};
+}
+
 void PhysicsWorld::beginGrab(BodyId id, const glm::vec3& worldPoint) {
     JPH::RVec3 pos;
     JPH::Quat rot;

@@ -93,6 +93,9 @@ public:
 
     void setStain(std::size_t index, materials::Stain stain);
 
+    /// Removes one block. Indices of later blocks shift down by one.
+    void removeBlock(std::size_t index);
+
     /// Removes all blocks (keeps static geometry).
     void clearBlocks();
 

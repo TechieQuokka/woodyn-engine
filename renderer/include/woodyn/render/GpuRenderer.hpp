@@ -52,6 +52,7 @@ struct WoodInstance {
 struct Ghost {
     std::uint32_t mesh = 0;
     glm::mat4 model{1.0f};
+    glm::vec4 color{0.45f, 0.70f, 1.0f, 0.32f}; // rgb + opacity
 };
 
 struct Camera {

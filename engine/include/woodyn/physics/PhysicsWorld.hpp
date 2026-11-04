@@ -101,6 +101,15 @@ public:
     /// current pose (shape cast). Returns nullopt if nothing is below within maxDrop.
     [[nodiscard]] std::optional<Transform> dropPreview(BodyId id, float maxDrop = 2.0f) const;
 
+    /// Where a block of `type` with `rotation` would come to rest if lowered
+    /// straight down from `start` (shape cast; nothing is created). Returns
+    /// nullopt if nothing is below, or if the block would start inside
+    /// something (an invalid placement).
+    [[nodiscard]] std::optional<Transform> placementPreview(blocks::BlockType type,
+                                                            materials::WoodSpecies species,
+                                                            const glm::quat& rotation, const glm::vec3& start,
+                                                            float maxDrop) const;
+
     // --- Grab-and-drag (D-09) -----------------------------------------------------
     /// Starts holding `id` at `worldPoint` (a point on the body) with a spring "hand".
     void beginGrab(BodyId id, const glm::vec3& worldPoint);

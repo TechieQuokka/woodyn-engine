@@ -565,6 +565,13 @@ Measured: a cube dropped at 25° onto the mat hit with a corner, flipped onto a 
 | D-49 | Packed detail texture | 1024² RGBA PNG: R = high-passed luminance ratio (features > ~5 mm removed, so the photo adds no tone or rings), G/B = normal x/y, A = roughness detail. Loaded with stb_image (pinned commit, SHA-256), mipmapped, 8× anisotropic, repeat. | 2026-11-04 |
 | D-50 | Applying the detail | GPU only (not part of the CPU `surfaceAlbedo` reference): projected in **log space** onto two planes containing the fiber axis, blended by the normal, so fibers always run along the real grain and stay continuous across blocks cut from the same log; per-log offset hides repetition; one tile = 20 cm of wood; strength 0.7 on side grain, none on end grain. Modulates albedo, normal and roughness. F10 toggles it. Completes D-39. | 2026-11-04 |
 
+### Creating & Removing Blocks (user design)
+
+| ID   | Topic               | Decision | Date |
+| ---- | ------------------- | -------- | ---- |
+| D-51 | Placement mode (user choice A) | A shelf shape or 1–9 enters placement mode: a translucent ghost follows the pointer, lowered onto whatever is under it (mat or other blocks) by a shape cast (`PhysicsWorld::placementPreview`); red when the spot is occupied or the block would stick out of the play area. Q/E/R/F (1°, hold = continuous, Shift = 90°), Ctrl+wheel/mouse and Space rotate the ghost before placing. Left click places the block gently (at rest, no drop) and leaves the mode; Shift+click keeps placing; right click (not a drag) or Esc cancels. The ghost starts square to the camera. Replaces "spawn straight into the hand" (D-43). | 2026-11-04 |
+| D-52 | Removing (user choice A + B) | Drop a held block onto the **toy box** at the right end of the shelf to put it away (soft knock sound), or press **Delete** on the held/hovered block. **Shift+Delete** clears everything (moved from Delete). Every removal is undoable with Ctrl+Z. `Simulation::removeBlock` keeps block indices consistent. | 2026-11-04 |
+
 ### Known Issues / Open Items (after Phase 4)
 
 - **End grain has no photo detail** (no suitable CC0 end-grain photo; procedural only).

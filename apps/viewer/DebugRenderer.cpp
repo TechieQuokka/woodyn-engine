@@ -291,7 +291,7 @@ void DebugRenderer::drawGhost(const Overlay::Ghost& ghost, const glm::mat4& view
                               const glm::vec3& eye) {
     m_triangles.clear();
     collectBlock(m_atlas->layout(ghost.type).mesh, {}, modelMatrix(ghost.transform),
-                 glm::vec3(0.55f, 0.75f, 1.0f), 1.0f, viewProj, eye, 0.28f);
+                 ghost.valid ? glm::vec3(0.55f, 0.75f, 1.0f) : glm::vec3(1.0f, 0.35f, 0.3f), 1.0f, viewProj, eye, 0.28f);
     SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
     flush(true);
 }

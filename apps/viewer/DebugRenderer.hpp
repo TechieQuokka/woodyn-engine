@@ -23,6 +23,7 @@ struct Overlay {
     struct Ghost {
         blocks::BlockType type;
         physics::Transform transform;
+        bool valid = true; // red when the spot is not allowed (placement mode)
     };
     std::optional<Ghost> ghost;          // drop preview
     std::optional<std::pair<glm::vec3, glm::vec3>> rubberBand; // grab point -> hand

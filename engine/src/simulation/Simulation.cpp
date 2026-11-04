@@ -98,6 +98,14 @@ void Simulation::setStain(std::size_t index, materials::Stain stain) {
     m_blocks.at(index).stain = stain;
 }
 
+void Simulation::removeBlock(std::size_t index) {
+    if (index >= m_blocks.size()) return;
+    m_world.removeBody(m_blocks[index].body);
+    m_blocks.erase(m_blocks.begin() + static_cast<std::ptrdiff_t>(index));
+    m_indexByBody.clear();
+    for (std::size_t i = 0; i < m_blocks.size(); ++i) m_indexByBody[m_blocks[i].body.value] = i;
+}
+
 void Simulation::clearBlocks() {
     for (const auto& b : m_blocks) {
         m_world.removeBody(b.body);

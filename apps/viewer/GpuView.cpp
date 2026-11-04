@@ -121,7 +121,10 @@ void GpuView::draw(const simulation::Simulation& sim, const OrbitCamera& camera,
     }
 
     std::optional<render::Ghost> ghost;
-    if (overlay.ghost) ghost = render::Ghost{static_cast<std::uint32_t>(overlay.ghost->type), modelMatrix(overlay.ghost->transform)};
+    if (overlay.ghost) {
+        ghost = render::Ghost{static_cast<std::uint32_t>(overlay.ghost->type), modelMatrix(overlay.ghost->transform),
+                              overlay.ghost->valid ? glm::vec4(0.45f, 0.72f, 1.0f, 0.5f) : glm::vec4(1.0f, 0.30f, 0.25f, 0.55f)};
+    }
 
     render::Camera cam;
     const float aspect = static_cast<float>(w) / static_cast<float>(h);

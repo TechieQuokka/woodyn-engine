@@ -26,16 +26,20 @@ public:
     struct StainSwatch {
         materials::Stain stain;
     };
-    using Hit = std::variant<BlockSlot, StainSwatch>;
+    struct ToyBox {}; // drop a held block here to put it away (D-52)
+    using Hit = std::variant<BlockSlot, StainSwatch, ToyBox>;
 
     /// Lays the shelf out for a render output of `width` x `height` pixels.
     void layout(int width, int height);
 
     [[nodiscard]] bool contains(float x, float y) const;
     [[nodiscard]] std::optional<Hit> hitTest(float x, float y) const;
+    [[nodiscard]] bool overToyBox(float x, float y) const;
 
+    /// @param toyBoxHot  a block is held over the toy box (highlight it)
+    /// @param placing    block shape currently being placed (highlighted slot)
     void draw(SDL_Renderer* renderer, materials::Stain nextStain, materials::WoodSpecies species,
-              float mouseX, float mouseY) const;
+              float mouseX, float mouseY, bool toyBoxHot, std::optional<blocks::BlockType> placing) const;
 
     bool visible = true;
 
@@ -51,6 +55,7 @@ private:
     SDL_FRect m_panel{};
     std::array<SDL_FRect, blocks::kAllBlockTypes.size()> m_slots{};
     std::array<SDL_FRect, materials::kAllStains.size()> m_swatches{};
+    SDL_FRect m_toyBox{};
     float m_scale = 1.0f;
 };
 
