@@ -30,6 +30,11 @@ target_link_libraries(woodyn_engine
     PUBLIC  glm::glm
     PRIVATE Jolt spdlog::spdlog)
 
+# woodyn/core/Version.hpp, generated from the project version.
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/woodyn/core/Version.hpp.in
+               ${CMAKE_BINARY_DIR}/generated/woodyn/core/Version.hpp @ONLY)
+target_include_directories(woodyn_engine PUBLIC ${CMAKE_BINARY_DIR}/generated)
+
 target_compile_definitions(woodyn_engine PUBLIC
     GLM_FORCE_DEPTH_ZERO_TO_ONE   # Vulkan clip space
     GLM_FORCE_CTOR_INIT           # vec = 0, quat = identity on default construction

@@ -325,7 +325,7 @@ struct GpuRenderer::Impl {
 
     /// Loads assets/wood/fiber_detail.png (falls back to a neutral texel).
     void loadFiberDetail() {
-        detail::Image img = detail::loadPng(std::string(WOODYN_ASSET_DIR) + "/wood/fiber_detail.png");
+        detail::Image img = detail::loadPng(assetDirectory() + "/wood/fiber_detail.png");
         if (img.rgba.empty()) {
             img.width = img.height = 1;
             img.rgba = {128, 128, 128, 128}; // ratio 1, flat normal, roughness ratio 1

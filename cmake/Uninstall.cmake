@@ -1,0 +1,33 @@
+# Removes the files recorded by the last `cmake --install` (install_manifest.txt
+# in the build directory), then the WOODYN directories if they became empty.
+set(manifest "${CMAKE_CURRENT_BINARY_DIR}/install_manifest.txt")
+if(NOT EXISTS "${manifest}")
+    message(FATAL_ERROR "No ${manifest}: nothing was installed from this build directory.")
+endif()
+file(STRINGS "${manifest}" files)
+set(dirs)
+foreach(f IN LISTS files)
+    if(EXISTS "${f}" OR IS_SYMLINK "${f}")
+        message(STATUS "Removing ${f}")
+        file(REMOVE "${f}")
+    endif()
+    # Collect the file's WOODYN directories up to (and including) .../woodyn.
+    get_filename_component(d "${f}" DIRECTORY)
+    while(d MATCHES "/woodyn(/|$)")
+        list(APPEND dirs "${d}")
+        get_filename_component(d "${d}" DIRECTORY)
+    endwhile()
+endforeach()
+# Remove now-empty directories that belong to WOODYN (deepest first).
+list(REMOVE_DUPLICATES dirs)
+list(SORT dirs ORDER DESCENDING)
+foreach(d IN LISTS dirs)
+    if(IS_DIRECTORY "${d}")
+        file(GLOB left "${d}/*")
+        if(NOT left)
+            message(STATUS "Removing directory ${d}")
+            file(REMOVE_RECURSE "${d}") # empty: removes only the directory itself
+        endif()
+    endif()
+endforeach()
+file(REMOVE "${manifest}")

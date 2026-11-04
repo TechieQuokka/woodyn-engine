@@ -589,6 +589,12 @@ Measurements, hardware and commands: [`docs/PERFORMANCE.md`](PERFORMANCE.md).
 | D-59 | Physics time budget | `Simulation::physicsBudgetMilliseconds` (viewer: 10 ms of the 16.7 ms frame; default 0 = off for tests and tools). When a frame's physics runs out of budget, its remaining fixed steps are dropped: the simulation runs in slow motion for a moment instead of the frame rate collapsing (no spiral of death). At least one step always runs; dropped steps do not advance simulated time and are not caught up later. The F1 HUD shows "SLOW MOTION" while it happens. Tests `PhysicsBudget.*`. | 2026-11-04 |
 | D-60 | Measured and left as is | **Frustum culling / LOD:** not added. All 1,000 blocks in every pass cost ≈ 0.7 ms of GPU time (320×200 run), so culling off-screen blocks could save well under 1 ms. **Worker threads:** stay at hardware threads − 1 (i3-14100F, 4C/8T: `knockall` 3.7 → 1.9 ms per frame from 1 → 7 threads; scaling is limited by 480 Hz steps of ~0.25 ms). **480 Hz (D-11) kept:** after D-58 the play scenes need 0.2–2 ms of physics per frame; D-11's 9.7 ms estimate was for 1,000 blocks all in free fall (`pile`, now 9.9 ms avg per frame, over budget in ~1 % of frames, handled by D-59). **Textures/shaders:** nothing else stood out in the measurements; the photo-detail texture is 1024² and the remaining cost is resolution-bound post-processing. | 2026-11-04 |
 
+### Release 1.0.0 — Installation
+
+| ID   | Topic               | Decision | Date |
+| ---- | ------------------- | -------- | ---- |
+| D-61 | Version and install (user choice A) | Version **1.0.0** (`woodyn/core/Version.hpp` generated from the CMake project version; `--version` on both programs). `cmake --install <build> --prefix ~/.local --strip` installs the commands **`woodyn`** (viewer) and **`woodyn-bench`**, data in `share/woodyn/{shaders,assets}`, a desktop entry (absolute `Exec`, category Game;Simulation) with an SVG icon, and docs/licenses in `share/doc/woodyn` (~11 MB, all libraries statically linked). `render::shaderDirectory()` / `assetDirectory()` look for `<exe>/../share/woodyn` first and fall back to the build tree, so build-tree runs and tests are unchanged. `cmake --build <build> --target uninstall` removes exactly the files of `install_manifest.txt` and the now-empty WOODYN directories. Verified: the installed program opens no file in the source/build tree. | 2026-11-04 |
+
 ### Known Issues / Open Items (after Phase 5)
 
 - **End grain has no photo detail** (no suitable CC0 end-grain photo; procedural only).

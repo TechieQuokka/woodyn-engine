@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.30)
 
 project(woodyn
-    VERSION 0.1.0
+    VERSION 1.0.0
     DESCRIPTION "WOODYN - Real Wood. Real Physics."
     LANGUAGES C CXX)
 
@@ -21,6 +21,11 @@ option(WOODYN_WARNINGS_AS_ERRORS "Treat warnings as errors for WOODYN targets" O
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Dependencies)
+include(GNUInstallDirs)
+
+# Installed layout: <prefix>/bin/woodyn finds its data in <prefix>/share/woodyn.
+file(RELATIVE_PATH WOODYN_INSTALL_DATA_REL
+     "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_DATADIR}/woodyn")
 
 add_subdirectory(engine)
 add_subdirectory(apps/bench)
@@ -36,3 +41,5 @@ if(WOODYN_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+include(Install)

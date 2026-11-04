@@ -1,5 +1,6 @@
 #pragma once
 
+#include "woodyn/render/Resources.hpp"
 #include "woodyn/wood/WoodCut.hpp"
 #include "woodyn/wood/WoodSource.hpp"
 
@@ -95,7 +96,7 @@ struct Settings {
 /// → depth of field → bloom → Khronos PBR Neutral tone mapping.
 class GpuRenderer {
 public:
-    explicit GpuRenderer(SDL_GPUDevice* device, std::string shaderDir = WOODYN_SHADER_DIR);
+    explicit GpuRenderer(SDL_GPUDevice* device, std::string shaderDir = shaderDirectory());
     ~GpuRenderer();
     GpuRenderer(const GpuRenderer&) = delete;
     GpuRenderer& operator=(const GpuRenderer&) = delete;

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=WOODYN
+GenericName=Wooden Block Toy
+Comment=Real Wood. Real Physics. Wooden toy blocks with real physics.
+Exec=@bin@
+Icon=woodyn
+Terminal=false
+Categories=Game;Simulation;
+Keywords=blocks;wood;toy;physics;kids;

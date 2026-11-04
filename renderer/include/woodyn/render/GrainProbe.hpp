@@ -1,6 +1,7 @@
 #pragma once
 
 #include "woodyn/materials/Stain.hpp"
+#include "woodyn/render/Resources.hpp"
 #include "woodyn/wood/WoodCut.hpp"
 #include "woodyn/wood/WoodSource.hpp"
 
@@ -26,6 +27,6 @@ struct GrainQuery {
 /// shader can be checked against the CPU reference (D-35).
 std::vector<glm::vec3> evaluateGrainOnGpu(SDL_GPUDevice* device, std::span<const wood::WoodSourceParams> sources,
                                           std::span<const GrainQuery> queries,
-                                          const std::string& shaderDir = WOODYN_SHADER_DIR);
+                                          const std::string& shaderDir = shaderDirectory());
 
 } // namespace woodyn::render

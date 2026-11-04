@@ -13,6 +13,7 @@
 // steps each), i.e. the physics cost the viewer pays per displayed frame.
 
 #include "woodyn/core/Log.hpp"
+#include "woodyn/core/Version.hpp"
 #include "woodyn/simulation/ImpactSound.hpp"
 #include "woodyn/simulation/Scenes.hpp"
 
@@ -103,6 +104,10 @@ Options parse(int argc, char** argv) {
         else if (a == "--trace") o.trace = true;
         else if (a == "--timeline") o.timeline = true;
         else if (a == "--csv") o.csv = true;
+        else if (a == "--version") {
+            std::printf("woodyn-bench %s\n", kVersion);
+            std::exit(0);
+        }
         else if (a == "--wav") o.wav = next();
         else if (a == "--set") {
             const std::string kv = next();

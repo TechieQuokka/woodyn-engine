@@ -74,7 +74,28 @@ ctest --preset clang-release        # 149 tests (GPU tests skip without Vulkan)
 The presets expect `clang++-23` in `/usr/bin` and `ninja` in `/usr/local/bin`;
 adjust `CMakePresets.json` for other locations.
 
+## Install
+
+Installs for the current user (no root, ~11 MB), with a desktop menu entry:
+
+```bash
+cmake --install build/clang-release --prefix ~/.local --strip
+woodyn                     # start the playroom (or "WOODYN" in the app menu)
+woodyn --version           # woodyn 1.0.0
+woodyn-bench --scene collapse --count 1000 --timeline
+
+cmake --build build/clang-release --target uninstall   # remove it again
+```
+
+Installed files: `bin/woodyn`, `bin/woodyn-bench`, `share/woodyn/` (shaders and
+textures), `share/applications/woodyn.desktop`, the icon and `share/doc/woodyn/`.
+The installed program finds its files relative to its own location, so the
+build directory can be deleted afterwards. `~/.local/bin` must be on `PATH`
+(it is by default on Ubuntu).
+
 ## Run
+
+From the build tree (the installed `woodyn` takes the same options):
 
 ```bash
 ./build/clang-release/apps/viewer/woodyn_viewer                    # playroom with a toy house

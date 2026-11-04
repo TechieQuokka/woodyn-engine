@@ -31,6 +31,7 @@
 #include "Shelf.hpp"
 
 #include "woodyn/core/Log.hpp"
+#include "woodyn/core/Version.hpp"
 #include "woodyn/simulation/ImpactSound.hpp"
 #include "woodyn/simulation/Scenes.hpp"
 
@@ -45,6 +46,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <random>
@@ -93,6 +95,10 @@ Options parse(int argc, char** argv) {
         else if (a == "--zoom") o.zoom = std::stof(next());
         else if (a == "--yaw") o.yaw = std::stof(next());
         else if (a == "--perf") o.perf = true;
+        else if (a == "--version") {
+            std::printf("woodyn %s\n", kVersion);
+            std::exit(0);
+        }
         else if (a == "--size") {
             const std::string v = next();
             const auto x = v.find('x');
@@ -847,6 +853,7 @@ public:
 int main(int argc, char** argv) {
     const Options opt = parse(argc, argv);
     log::init(log::Level::Info);
+    log::info("WOODYN {}", kVersion);
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         log::warn("SDL audio init failed ({}), continuing without sound", SDL_GetError());

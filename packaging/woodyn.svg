@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- WOODYN icon: a beech block resting across a red and a blue block (isometric). -->
+  <!-- bottom back: red -->
+  <g transform="translate(22 48)">
+    <path d="M0 14 L28 0 L56 14 L28 28 Z" fill="#f0645a"/>
+    <path d="M0 14 L28 28 L28 58 L0 44 Z" fill="#d5473f"/>
+    <path d="M28 28 L56 14 L56 44 L28 58 Z" fill="#b8352f"/>
+  </g>
+  <!-- bottom front: blue -->
+  <g transform="translate(50 62)">
+    <path d="M0 14 L28 0 L56 14 L28 28 Z" fill="#6aa6ec"/>
+    <path d="M0 14 L28 28 L28 58 L0 44 Z" fill="#4c86cf"/>
+    <path d="M28 28 L56 14 L56 44 L28 58 Z" fill="#3b6fb3"/>
+  </g>
+  <!-- top: natural beech, resting on both -->
+  <g transform="translate(36 25)">
+    <path d="M0 14 L28 0 L56 14 L28 28 Z" fill="#f2d3a6"/>
+    <path d="M0 14 L28 28 L28 58 L0 44 Z" fill="#ddb37c"/>
+    <path d="M28 28 L56 14 L56 44 L28 58 Z" fill="#c8995f"/>
+    <path d="M5 22 L23 31 M5 32 L23 41 M33 31 L51 22 M33 41 L51 32" stroke="#a87a45" stroke-width="1.2" stroke-opacity="0.55" fill="none"/>
+  </g>
+</svg>
