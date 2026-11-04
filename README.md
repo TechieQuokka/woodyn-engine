@@ -68,7 +68,7 @@ git clone https://github.com/TechieQuokka/woodyn-engine.git
 cd woodyn-engine
 cmake --preset clang-release        # or clang-debug / gcc-debug
 cmake --build --preset clang-release
-ctest --preset clang-release        # 142 tests (GPU tests skip without Vulkan)
+ctest --preset clang-release        # 144 tests (GPU tests skip without Vulkan)
 ```
 
 The presets expect `clang++-23` in `/usr/bin` and `ninja` in `/usr/local/bin`;

@@ -36,6 +36,10 @@ struct SurfaceProperties {
     float rollingResistance = 0.0f;
     /// Soft, compliant surface (foam): absorbs the rotational kick of impacts (D-47).
     bool soft = false;
+    /// Visible surfaces can be picked by ray casts. Invisible bounds (the walls
+    /// above the fence, the ceiling) still stop blocks but are ignored by
+    /// picking, so the pointer reaches the mat through them (D-53).
+    bool pickable = true;
 };
 
 /// Result of a ray cast against the physics world.
@@ -93,7 +97,8 @@ public:
 
     // --- Queries ---------------------------------------------------------------------
     /// Casts a ray; `direction` need not be normalized. Only dynamic blocks are
-    /// considered when `blocksOnly` is true.
+    /// considered when `blocksOnly` is true; non-pickable invisible bounds are
+    /// always ignored.
     [[nodiscard]] std::optional<RayHit> castRay(const glm::vec3& origin, const glm::vec3& direction,
                                                 float maxDistance, bool blocksOnly = true) const;
 

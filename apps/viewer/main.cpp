@@ -566,8 +566,9 @@ private:
         const glm::vec3 start{hit->point.x, hit->point.y + 2.0f * reach + 0.02f, hit->point.z};
         const auto rest = m_sim.world().placementPreview(p.type, m_species, p.rotation, start, start.y + 0.05f);
         if (!rest) {
+            // Spot occupied: show the ghost red where the pointer is (on a visible surface).
             p.pose = physics::Transform{hit->point + glm::vec3(0.0f, def.halfExtents.y, 0.0f), p.rotation};
-            return; // shown red
+            return;
         }
         p.pose = rest;
         // Must lie fully inside the play area and below its ceiling.

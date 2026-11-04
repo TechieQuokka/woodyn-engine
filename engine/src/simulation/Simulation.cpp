@@ -52,6 +52,8 @@ void Simulation::addPlayArea(const PlayArea& area) {
     const float outer = h + t;
     const auto& wood = materials::physicalProperties(materials::WoodSpecies::Beech);
     const physics::SurfaceProperties woodSurface{wood.friction, wood.restitution, wood.rollingResistance};
+    physics::SurfaceProperties invisible = woodSurface; // stops blocks, ignored by picking (D-53)
+    invisible.pickable = false;
 
     // Mat (thick slab, top at y = 0).
     addSurfaceBox({outer, t * 0.5f, outer}, {0.0f, -t * 0.5f, 0.0f}, kPlayMat,
@@ -69,11 +71,11 @@ void Simulation::addPlayArea(const PlayArea& area) {
         addSurfaceBox({half.x, fenceHalf, half.z}, offset + glm::vec3(0.0f, fenceHalf, 0.0f), woodSurface,
                       audio::SurfaceKind::Wood);
         addSurfaceBox({half.x, upperHalf, half.z},
-                      offset + glm::vec3(0.0f, area.fenceHeight + upperHalf, 0.0f), woodSurface,
+                      offset + glm::vec3(0.0f, area.fenceHeight + upperHalf, 0.0f), invisible,
                       audio::SurfaceKind::Silent);
     }
     // Ceiling.
-    addSurfaceBox({outer, t * 0.5f, outer}, {0.0f, area.wallHeight + t * 0.5f, 0.0f}, woodSurface,
+    addSurfaceBox({outer, t * 0.5f, outer}, {0.0f, area.wallHeight + t * 0.5f, 0.0f}, invisible,
                   audio::SurfaceKind::Silent);
     m_playArea = area;
 }

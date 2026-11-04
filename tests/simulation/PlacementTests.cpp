@@ -67,3 +67,33 @@ TEST(Placement, RemoveBlockKeepsIndicesConsistent) {
     test::runFor(sim, 1.0f); // the cubes above the gap fall down: still simulating fine
     EXPECT_EQ(sim.world().bodyCount(), 3u + 1u + 8u + 1u); // blocks + mat + walls (4x2) + ceiling
 }
+
+// D-53: with the camera outside the play area (zoomed out / orbited), the
+// pointer ray must pass through the invisible walls and reach the mat, so
+// placement works from any camera position.
+TEST(Placement, PickingIgnoresInvisibleWallsAndCeiling) {
+    simulation::Simulation sim;
+    sim.addPlayArea();
+    const glm::vec3 eye{0.9f, 0.6f, 1.1f};                    // outside the 0.6 m walls
+    const glm::vec3 target{0.05f, 0.0f, -0.05f};
+    const auto hit = sim.world().castRay(eye, target - eye, 5.0f, false);
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_NEAR(hit->point.y, 0.0f, 0.001f) << "ray stopped at an invisible wall";
+    EXPECT_NEAR(hit->point.x, target.x, 0.002f);
+    const glm::vec3 start = hit->point + glm::vec3(0.0f, 0.2f, 0.0f);
+    const auto p = sim.world().placementPreview(blocks::BlockType::Cube, materials::WoodSpecies::Beech,
+                                                glm::quat(1, 0, 0, 0), start, 0.25f);
+    ASSERT_TRUE(p.has_value());
+    EXPECT_NEAR(p->position.y, 0.5f * test::u, 0.0005f);
+}
+
+TEST(Placement, InvisibleWallsStillStopBlocks) {
+    simulation::Simulation sim;
+    sim.addPlayArea();
+    const auto i = sim.addBlock(blocks::BlockType::Cube, materials::WoodSpecies::Beech, {{0.0f, 0.5f, 0.0f}, {}});
+    sim.world().setLinearVelocity(sim.blocks()[i].body, {20.0f, 2.0f, 0.0f});
+    test::runFor(sim, 2.0f);
+    const auto p = sim.world().transform(sim.blocks()[i].body).position;
+    EXPECT_LT(std::abs(p.x), sim.playArea()->halfSize);
+    EXPECT_EQ(sim.boundsCorrections(), 0u);
+}

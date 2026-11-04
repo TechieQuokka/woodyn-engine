@@ -41,8 +41,15 @@ namespace {
 namespace Layers {
 constexpr JPH::ObjectLayer kStatic = 0;
 constexpr JPH::ObjectLayer kMoving = 1;
-constexpr JPH::uint kCount = 2;
+constexpr JPH::ObjectLayer kBounds = 2; // invisible walls/ceiling: block blocks, ignored by picking
+constexpr JPH::uint kCount = 3;
 } // namespace Layers
+
+/// Ray-cast filter for picking: everything that can be seen (D-53).
+class VisibleLayerFilter final : public JPH::ObjectLayerFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer layer) const override { return layer != Layers::kBounds; }
+};
 
 namespace BroadPhaseLayers {
 constexpr JPH::BroadPhaseLayer kStatic{0};
@@ -215,7 +222,9 @@ struct PhysicsWorld::Impl {
           contacts(t.maxBodies) {
         objectPairFilter.EnableCollision(Layers::kMoving, Layers::kStatic);
         objectPairFilter.EnableCollision(Layers::kMoving, Layers::kMoving);
+        objectPairFilter.EnableCollision(Layers::kMoving, Layers::kBounds);
         broadPhaseLayers.MapObjectToBroadPhaseLayer(Layers::kStatic, BroadPhaseLayers::kStatic);
+        broadPhaseLayers.MapObjectToBroadPhaseLayer(Layers::kBounds, BroadPhaseLayers::kStatic);
         broadPhaseLayers.MapObjectToBroadPhaseLayer(Layers::kMoving, BroadPhaseLayers::kMoving);
         // The table snapshots the layer setup at construction: build it last.
         objectVsBroadPhase = std::make_unique<JPH::ObjectVsBroadPhaseLayerFilterTable>(
@@ -436,7 +445,8 @@ BodyId PhysicsWorld::addStaticBox(const glm::vec3& halfExtents, const Transform&
                                    halfExtents.z}) * m_impl->scale;
     JPH::BodyCreationSettings settings(new JPH::BoxShape(m_impl->len(halfExtents), radius),
                                        m_impl->len(transform.position), toJolt(transform.rotation),
-                                       JPH::EMotionType::Static, Layers::kStatic);
+                                       JPH::EMotionType::Static,
+                                       surface.pickable ? Layers::kStatic : Layers::kBounds);
     settings.mFriction = surface.friction;
     settings.mRestitution = surface.restitution;
     settings.mUserData = packRolling(surface.rollingResistance, surface.soft ? 1.0f : 0.0f);
@@ -540,7 +550,8 @@ std::optional<RayHit> PhysicsWorld::castRay(const glm::vec3& origin, const glm::
         const JPH::SpecifiedObjectLayerFilter layerFilter(Layers::kMoving);
         found = query.CastRay(ray, hit, bpFilter, layerFilter);
     } else {
-        found = query.CastRay(ray, hit);
+        const VisibleLayerFilter visible;
+        found = query.CastRay(ray, hit, {}, visible);
     }
     if (!found) return std::nullopt;
     return RayHit{fromJolt(hit.mBodyID), m_impl->len(ray.GetPointOnRay(hit.mFraction)),
